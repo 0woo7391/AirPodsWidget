@@ -1,0 +1,32 @@
+# Local Python environment and caches
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.final-runtime-check*/
+
+# Generated PyInstaller/MSIX output
+build/
+dist/
+_internal/
+AirPodsWidget.exe
+AirPodsWidget.msix
+
+# Generated previews and UI captures
+*.png
+
+# Temporary signing material and logs
+*.log
+
+# User-supplied audio; publish only after confirming redistribution rights
+assets/low_power_warning.mp3
+
+# Local credentials, certificates and personal configuration
+.env
+.env.*
+*.key
+*.pem
+*.pfx
+*.cer
+*.crt
+*.zip

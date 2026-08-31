@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:uap7="http://schemas.microsoft.com/appx/manifest/uap/windows10/7"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap uap7 rescap">
+  <Identity
+    Name="AirPodsWidget"
+    Publisher="CN=AirPodsWidget Dev"
+    Version="0.1.7.0"
+    ProcessorArchitecture="x64" />
+  <Properties>
+    <DisplayName>AirPodsWidget</DisplayName>
+    <PublisherDisplayName>AirPodsWidget</PublisherDisplayName>
+    <Description>AirPods Pro battery and media widget for Windows</Description>
+    <Logo>Assets\logo.png</Logo>
+  </Properties>
+  <Resources>
+    <Resource Language="en-us" />
+  </Resources>
+  <Dependencies>
+    <TargetDeviceFamily
+      Name="Windows.Desktop"
+      MinVersion="10.0.17763.0"
+      MaxVersionTested="10.0.19045.0" />
+  </Dependencies>
+  <Capabilities>
+    <rescap:Capability Name="runFullTrust" />
+    <uap7:Capability Name="globalMediaControl" />
+  </Capabilities>
+  <Applications>
+    <Application
+      Id="AirPodsWidget"
+      Executable="AirPodsWidget.exe"
+      EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements
+        DisplayName="AirPodsWidget"
+        Description="AirPods Pro battery and media widget"
+        BackgroundColor="#161618"
+        Square150x150Logo="Assets\logo.png"
+        Square44x44Logo="Assets\logo.png" />
+    </Application>
+  </Applications>
+</Package>
