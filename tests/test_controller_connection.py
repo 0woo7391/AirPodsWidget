@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 
 from controller import AppController
-from models import AirPodsState
+from models import AirPodsState, MediaState
 
 
 class SignalRecorder:
@@ -62,3 +62,24 @@ def test_ble_recovery_does_not_show_connection_popup_without_real_bt_transition(
     double._connection_popup_pending = True
     AppController._on_airpods_state(double, recovered)
     assert double.popup_calls == [True]
+
+
+def test_expired_ble_in_ear_state_cannot_trigger_auto_pause():
+    stale = AirPodsState(connected=True, in_ear_fresh=False)
+    stale.left.in_ear = False
+    stale.right.in_ear = False
+    media = MediaState(playing=True)
+    calls = []
+
+    double = SimpleNamespace(
+        _airpods=stale,
+        _ear_generation=3,
+        _media=media,
+        media=SimpleNamespace(pause=lambda: calls.append("pause")),
+        _paused_by_ear_detection=False,
+    )
+
+    AppController._confirm_auto_pause(double, 3)
+
+    assert calls == []
+    assert double._paused_by_ear_detection is False

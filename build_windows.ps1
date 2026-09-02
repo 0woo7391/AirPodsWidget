@@ -1,7 +1,14 @@
 ﻿$ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 
-$runningApp = Get-Process -Name "AirPodsWidget" -ErrorAction SilentlyContinue
+$rootExePath = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "AirPodsWidget.exe"))
+$runningApp = Get-Process -Name "AirPodsWidget" -ErrorAction SilentlyContinue | Where-Object {
+    try {
+        $_.Path -and [IO.Path]::GetFullPath($_.Path) -ieq $rootExePath
+    } catch {
+        $false
+    }
+}
 if ($runningApp) {
     throw "AirPodsWidget.exe가 실행 중입니다. 앱을 종료한 뒤 다시 빌드하세요. 기존 실행 파일은 변경하지 않았습니다."
 }
@@ -51,7 +58,7 @@ $env:PYTHONPATH = Join-Path $PSScriptRoot "src"
 
 Remove-Item -Recurse -Force build, dist -ErrorAction SilentlyContinue
 & $venvPython -m PyInstaller --clean --noconfirm AirPodsWidget.spec
-Copy-Item README.md, BUILD_REPORT.md, UI_REDESIGN_SPEC.md, LICENSE, THIRD_PARTY_NOTICES.md -Destination "dist\AirPodsWidget"
+Copy-Item README.md, BUILD_REPORT.md, UI_REDESIGN_SPEC.md, UI_V2_DESIGN_BRIEF.md, LICENSE, THIRD_PARTY_NOTICES.md -Destination "dist\AirPodsWidget"
 
 $packageDir = Join-Path $PSScriptRoot "dist\AirPodsWidget"
 $rootRuntimeDir = Join-Path $PSScriptRoot "_internal"

@@ -65,6 +65,7 @@ def test_expired_side_drops_stale_in_ear_state_without_losing_device():
     assert refreshed is not None
     assert refreshed.left.in_ear is False
     assert refreshed.right.in_ear is True
+    assert refreshed.in_ear_fresh is False
     assert manager.current is not None
 
 
@@ -85,6 +86,7 @@ def test_all_expired_sides_clear_stale_in_ear_but_keep_battery():
     assert refreshed is not None
     assert refreshed.left.in_ear is False
     assert refreshed.right.in_ear is False
+    assert refreshed.in_ear_fresh is False
     assert refreshed.left.battery.percent == 80
     assert refreshed.right.battery.percent == 70
 

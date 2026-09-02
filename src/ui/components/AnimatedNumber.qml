@@ -15,7 +15,9 @@ Text {
     property real revealOpacity: value < 0 ? 0.58 : 1
     property real revealScale: 1
 
-    text: value < 0 ? "—" : Math.round(animatedValue) + suffix
+    // Unknown values are rendered by the parent EmptyIndicator. Keeping this
+    // layer blank prevents a stale em dash from flashing during a data swap.
+    text: value < 0 ? "" : Math.round(animatedValue) + suffix
     color: foreground
     font.family: root.fontFamily
     font.pixelSize: root.pixelSize

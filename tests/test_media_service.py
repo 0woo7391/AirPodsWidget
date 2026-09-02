@@ -21,6 +21,9 @@ class FakeControls:
 class FakePlayback:
     def __init__(self, status="playing"):
         self.controls = FakeControls()
+        if status == "paused":
+            self.controls.is_play_enabled = True
+            self.controls.is_pause_enabled = False
         self.playback_status = status
 
 
@@ -100,6 +103,16 @@ def test_read_state_maps_media_properties_and_capabilities():
     assert state.seekable is True
 
 
+def test_paused_session_keeps_media_and_playback_controls():
+    state = asyncio.run(
+        MediaService._read_state(FakeSession(status="paused"), FakePlaybackStatus)
+    )
+
+    assert state.available is True
+    assert state.playing is False
+    assert state.can_play_pause is True
+
+
 def test_commands_are_delivered_in_order():
     service = MediaService()
     session = FakeSession()
@@ -134,6 +147,16 @@ def test_toggle_uses_explicit_pause_for_a_playing_session():
     assert session.calls == ["pause"]
 
 
+def test_toggle_uses_explicit_play_for_a_paused_session():
+    service = MediaService()
+    session = FakeSession(status="paused")
+
+    service.toggle_play_pause()
+    asyncio.run(service._drain_commands(session, FakePlaybackStatus))
+
+    assert session.calls == ["play"]
+
+
 def test_select_session_prefers_the_session_that_is_playing():
     stale = FakeSession(status="paused")
     active = FakeSession(status="playing")
@@ -142,6 +165,37 @@ def test_select_session_prefers_the_session_that_is_playing():
     selected = asyncio.run(MediaService._select_session(manager, FakePlaybackStatus))
 
     assert selected is active
+
+
+def test_select_session_keeps_the_last_session_when_current_is_missing():
+    paused = FakeSession(status="paused")
+    manager = FakeSessionManager(None, [])
+
+    selected = asyncio.run(
+        MediaService._select_session(
+            manager,
+            FakePlaybackStatus,
+            preferred_session=paused,
+        )
+    )
+
+    assert selected is paused
+
+
+def test_select_session_prefers_last_session_over_an_unrelated_paused_current():
+    stale = FakeSession(status="paused")
+    paused_last = FakeSession(status="paused")
+    manager = FakeSessionManager(stale, [stale, paused_last])
+
+    selected = asyncio.run(
+        MediaService._select_session(
+            manager,
+            FakePlaybackStatus,
+            preferred_session=paused_last,
+        )
+    )
+
+    assert selected is paused_last
 
 
 def test_stopped_session_does_not_leave_old_media_visible():

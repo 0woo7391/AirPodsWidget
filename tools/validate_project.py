@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 REQUIRED_FILES = [
     "UI_REDESIGN_SPEC.md",
+    "UI_V2_DESIGN_BRIEF.md",
     "assets/low_power_warning.mp3",
     "assets/app.ico",
     "assets/fonts/Pretendard-Regular.otf",

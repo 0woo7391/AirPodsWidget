@@ -65,6 +65,10 @@ class AirPodsStateManager:
                 # flags when both broadcasters have expired.
                 self._current.left.in_ear = False
                 self._current.right.in_ear = False
+            if self._current is not None:
+                # Expiry is an uncertainty boundary. It must not be treated
+                # as a fresh physical removal by the auto-pause feature.
+                self._current.in_ear_fresh = False
             self._pending_expiry_state = deepcopy(self._current)
         return False
 

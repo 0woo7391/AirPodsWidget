@@ -4,6 +4,7 @@ Item {
     id: root
     property string icon: "play"
     property color foreground: "white"
+    property real progress: 0
     property real strokeWidth: Math.max(1.5, width * 0.08)
 
     implicitWidth: 18
@@ -17,6 +18,10 @@ Item {
             const ctx = getContext("2d")
             ctx.clearRect(0, 0, width, height)
             ctx.fillStyle = root.foreground
+            ctx.strokeStyle = root.foreground
+            ctx.lineWidth = root.strokeWidth
+            ctx.lineCap = "round"
+            ctx.lineJoin = "round"
             const w = width
             const h = height
             if (root.icon === "play") {
@@ -57,26 +62,17 @@ Item {
                 ctx.closePath()
                 ctx.fill()
                 if (root.icon === "volume") {
-                    ctx.strokeStyle = root.foreground
-                    ctx.lineWidth = root.strokeWidth
                     ctx.beginPath()
                     ctx.arc(w * 0.50, h * 0.50, w * 0.28, -0.72, 0.72)
                     ctx.stroke()
                 }
             } else if (root.icon === "headphones") {
-                ctx.strokeStyle = root.foreground
-                ctx.lineWidth = root.strokeWidth
-                ctx.lineCap = "round"
                 ctx.beginPath()
                 ctx.arc(w * 0.50, h * 0.48, w * 0.31, Math.PI, 0)
                 ctx.stroke()
                 ctx.fillRect(w * 0.15, h * 0.49, w * 0.15, h * 0.27)
                 ctx.fillRect(w * 0.70, h * 0.49, w * 0.15, h * 0.27)
             } else if (root.icon === "bluetooth") {
-                ctx.strokeStyle = root.foreground
-                ctx.lineWidth = root.strokeWidth
-                ctx.lineCap = "round"
-                ctx.lineJoin = "round"
                 ctx.beginPath()
                 ctx.moveTo(w * 0.49, h * 0.10)
                 ctx.lineTo(w * 0.73, h * 0.32)
@@ -89,23 +85,46 @@ Item {
                 ctx.moveTo(w * 0.25, h * 0.70)
                 ctx.lineTo(w * 0.73, h * 0.32)
                 ctx.stroke()
-            } else if (root.icon === "bolt") {
-                // Compact filled bolt: no emoji glyph, outline, or enclosing
-                // badge, so charging reads as a clean status symbol.
+            } else if (root.icon === "charging") {
+                // A small filled lightning mark is clearer at this size than
+                // an outlined battery or an emoji glyph. It stays in the
+                // shared state column and does not change row geometry.
                 ctx.beginPath()
-                ctx.moveTo(w * 0.57, h * 0.08)
-                ctx.lineTo(w * 0.23, h * 0.55)
-                ctx.lineTo(w * 0.46, h * 0.55)
-                ctx.lineTo(w * 0.37, h * 0.92)
+                ctx.moveTo(w * 0.56, h * 0.08)
+                ctx.lineTo(w * 0.24, h * 0.52)
+                ctx.lineTo(w * 0.48, h * 0.52)
+                ctx.lineTo(w * 0.38, h * 0.92)
                 ctx.lineTo(w * 0.78, h * 0.40)
-                ctx.lineTo(w * 0.54, h * 0.40)
+                ctx.lineTo(w * 0.52, h * 0.40)
                 ctx.closePath()
                 ctx.fill()
+            } else if (root.icon === "chevron") {
+                const progress = Math.max(0, Math.min(1, root.progress))
+                const outerY = h * (0.38 + 0.24 * progress)
+                const centerY = h * (0.66 - 0.32 * progress)
+                ctx.beginPath()
+                ctx.moveTo(w * 0.22, outerY)
+                ctx.lineTo(w * 0.50, centerY)
+                ctx.lineTo(w * 0.78, outerY)
+                ctx.stroke()
+            } else if (root.icon === "chevron-down" || root.icon === "chevron-up") {
+                ctx.beginPath()
+                if (root.icon === "chevron-down") {
+                    ctx.moveTo(w * 0.22, h * 0.38)
+                    ctx.lineTo(w * 0.50, h * 0.66)
+                    ctx.lineTo(w * 0.78, h * 0.38)
+                } else {
+                    ctx.moveTo(w * 0.22, h * 0.62)
+                    ctx.lineTo(w * 0.50, h * 0.34)
+                    ctx.lineTo(w * 0.78, h * 0.62)
+                }
+                ctx.stroke()
             }
         }
     }
 
     onIconChanged: canvas.requestPaint()
+    onProgressChanged: canvas.requestPaint()
     onForegroundChanged: canvas.requestPaint()
     onWidthChanged: canvas.requestPaint()
     onHeightChanged: canvas.requestPaint()

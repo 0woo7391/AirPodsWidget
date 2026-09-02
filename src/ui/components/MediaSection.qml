@@ -4,6 +4,7 @@ import QtQuick.Layouts
 Item {
     id: root
     property bool available: false
+    property bool persistent: false
     property bool playing: false
     property string title: ""
     property string subtitle: ""
@@ -17,21 +18,20 @@ Item {
     property double clockTimestamp: Date.now()
     property UiTheme theme
     property real materialOpacity: 1.0
+    // Media enters last in the expanded composition. Its height remains owned
+    // by the frozen parent layout; only the visual reveal is animated here.
+    property real revealProgress: 1.0
 
-    implicitHeight: available ? 150 : 0
+    readonly property bool slotVisible: available || persistent
+
+    implicitHeight: slotVisible ? 146 : 0
     height: implicitHeight
-    opacity: available ? 1 : 0
+    opacity: slotVisible ? root.revealProgress : 0
     visible: height > 1
-
-    Behavior on height {
-        NumberAnimation { duration: root.theme.motionLayout; easing.type: Easing.OutCubic }
-    }
-    Behavior on opacity {
-        NumberAnimation { duration: root.theme.motionStandard; easing.type: Easing.OutCubic }
+    transform: Translate {
+        y: (1 - root.revealProgress) * (root.theme ? root.theme.motionMorphSlide : 14)
     }
 
-    // Windows timeline updates are not guaranteed to arrive every second.
-    // The local clock keeps the display responsive while playback is active.
     onPositionSecondsChanged: {
         if (!playbackSlider.pressed) {
             root.clockPosition = root.positionSeconds
@@ -61,107 +61,147 @@ Item {
 
     Rectangle {
         anchors.fill: parent
-        radius: root.theme.cardRadius
-        color: "transparent"
-        gradient: Gradient {
-            GradientStop { position: 0.00; color: root.theme.glassCardTop(root.materialOpacity) }
-            GradientStop { position: 1.00; color: root.theme.glassCardBottom(root.materialOpacity) }
-        }
+        radius: root.theme.cardRadius + 2
+        color: root.theme.surfaceRaised
         border.width: 1
-        border.color: root.theme.sectionBorder
+        border.color: root.theme.border
     }
 
     ColumnLayout {
         anchors.fill: parent
-        anchors.leftMargin: 16
-        anchors.rightMargin: 16
-        anchors.topMargin: 12
-        anchors.bottomMargin: 10
+        anchors.leftMargin: 15
+        anchors.rightMargin: 15
+        anchors.topMargin: 10
+        anchors.bottomMargin: 8
         spacing: 0
 
-        Item {
+        RowLayout {
             Layout.fillWidth: true
-            Layout.preferredHeight: 40
+            Layout.preferredHeight: 13
+            spacing: 6
 
-            Column {
-                anchors.left: parent.left
-                anchors.right: parent.right
-                anchors.top: parent.top
-                spacing: 7
+            Rectangle {
+                Layout.preferredWidth: 4
+                Layout.preferredHeight: 4
+                radius: 2
+                color: root.theme.accent
+                opacity: root.available ? 1 : 0.55
+            }
 
-                MarqueeText {
-                    width: parent.width
-                    height: 21
-                    text: root.title
-                    color: root.theme.textPrimary
-                    fontFamily: root.theme.fontDisplay
-                    pixelSize: root.theme.bodySize + 1
-                    fontWeight: root.theme.titleWeight
-                    running: root.playing
-                }
+            Text {
+                text: root.available ? "NOW PLAYING" : "PLAYER"
+                color: root.theme.textTertiary
+                font.family: root.theme.fontText
+                font.pixelSize: root.theme.microSize
+                font.weight: root.theme.labelWeight
+                font.letterSpacing: 1.1
+            }
+
+            Item { Layout.fillWidth: true }
+        }
+
+        MarqueeText {
+            Layout.fillWidth: true
+            Layout.preferredHeight: 22
+            text: root.title
+            color: root.theme.textPrimary
+            fontFamily: root.theme.fontDisplay
+            pixelSize: root.theme.bodySize + 1
+            fontWeight: root.theme.titleWeight
+            running: root.playing
+
+            EmptyIndicator {
+                anchors.fill: parent
+                theme: root.theme
+                active: !root.available
+            }
+        }
+
+        AnimatedText {
+            Layout.fillWidth: true
+            Layout.preferredHeight: 16
+            text: root.subtitle
+            color: root.theme.textSecondary
+            fontFamily: root.theme.fontText
+            pixelSize: root.theme.captionSize
+            elide: Text.ElideRight
+            changeDuration: 130
+        }
+
+        // A small title/subtitle separation keeps the two readings distinct;
+        // the larger player gaps belong between groups, not inside the text.
+        Item { Layout.preferredHeight: 3 }
+
+        RowLayout {
+            Layout.fillWidth: true
+            Layout.preferredHeight: 13
+
+            Item {
+                Layout.preferredWidth: 38
+                Layout.fillHeight: true
 
                 Text {
-                    width: parent.width
-                    height: 15
-                    text: root.subtitle
-                    color: root.theme.textSecondary
-                    font.family: root.theme.fontText
-                    font.pixelSize: root.theme.captionSize
+                    anchors.fill: parent
+                    text: root.formatTime(root.displayedPosition)
+                    color: root.theme.textTertiary
+                    font.family: root.theme.fontDisplay
+                    font.pixelSize: root.theme.microSize
                     elide: Text.ElideRight
                     renderType: Text.NativeRendering
                 }
-            }
-        }
 
-        ColumnLayout {
-            Layout.fillWidth: true
-            Layout.preferredHeight: 35
-            spacing: 2
-
-            RowLayout {
-                Layout.fillWidth: true
-                Layout.preferredHeight: 15
-
-                Text {
-                    text: root.formatTime(root.displayedPosition)
-                    color: root.theme.textSecondary
-                    font.family: root.theme.fontDisplay
-                    font.pixelSize: root.theme.captionSize
+                EmptyIndicator {
+                    anchors.fill: parent
+                    theme: root.theme
+                    active: root.durationSeconds <= 0
                 }
+            }
 
-                Item { Layout.fillWidth: true }
+            Item { Layout.fillWidth: true }
+
+            Item {
+                Layout.preferredWidth: 38
+                Layout.fillHeight: true
 
                 Text {
+                    anchors.fill: parent
                     text: root.formatTime(root.durationSeconds)
-                    color: root.theme.textSecondary
+                    color: root.theme.textTertiary
                     font.family: root.theme.fontDisplay
-                    font.pixelSize: root.theme.captionSize
+                    font.pixelSize: root.theme.microSize
+                    horizontalAlignment: Text.AlignRight
+                    elide: Text.ElideRight
+                    renderType: Text.NativeRendering
                 }
-            }
 
-            AppleSlider {
-                id: playbackSlider
-                Layout.fillWidth: true
-                Layout.preferredHeight: 18
-                theme: root.theme
-                from: 0
-                to: Math.max(1, root.durationSeconds)
-                value: Math.max(0, Math.min(to, root.displayedPosition))
-                enabled: appController.mediaSeekable
-                opacity: root.durationSeconds > 0 ? (enabled ? 1 : 0.5) : 0.35
-                smoothExternalChanges: false
-                progressColor: root.theme.dark ? "#EDEDED" : "#1B1B1B"
-                trackColor: root.theme.dark ? "#3A3A3A" : "#B2B2B2"
-                onMoved: {
-                    root.displayedPosition = value
-                    root.clockPosition = value
-                    root.clockTimestamp = Date.now()
-                    appController.seekMedia(value)
+                EmptyIndicator {
+                    anchors.fill: parent
+                    theme: root.theme
+                    active: root.durationSeconds <= 0
                 }
             }
         }
 
-        Item { Layout.fillHeight: true }
+        AppleSlider {
+            id: playbackSlider
+            Layout.fillWidth: true
+            Layout.preferredHeight: 16
+            theme: root.theme
+            from: 0
+            to: Math.max(1, root.durationSeconds)
+            value: Math.max(0, Math.min(to, root.displayedPosition))
+            enabled: appController.mediaSeekable
+            opacity: root.durationSeconds > 0 ? (enabled ? 1 : 0.45) : 0.3
+            smoothExternalChanges: false
+            progressColor: root.theme.textPrimary
+            trackColor: root.theme.track
+            onMoved: {
+                root.displayedPosition = value
+                root.clockPosition = value
+                root.clockTimestamp = Date.now()
+                appController.seekMedia(value)
+            }
+        }
 
         RowLayout {
             Layout.fillWidth: true
@@ -174,8 +214,8 @@ Item {
                 theme: root.theme
                 iconName: "previous"
                 enabled: root.canPrevious
-                implicitWidth: 38
-                implicitHeight: 38
+                implicitWidth: 36
+                implicitHeight: 36
                 onClicked: appController.previousTrack()
             }
 
@@ -184,8 +224,8 @@ Item {
                 iconName: root.playing ? "pause" : "play"
                 primary: true
                 enabled: root.canPlayPause
-                implicitWidth: 46
-                implicitHeight: 46
+                implicitWidth: 44
+                implicitHeight: 44
                 onClicked: appController.togglePlayPause()
             }
 
@@ -193,8 +233,8 @@ Item {
                 theme: root.theme
                 iconName: "next"
                 enabled: root.canNext
-                implicitWidth: 38
-                implicitHeight: 38
+                implicitWidth: 36
+                implicitHeight: 36
                 onClicked: appController.nextTrack()
             }
 
@@ -204,7 +244,7 @@ Item {
 
     function formatTime(seconds) {
         if (seconds <= 0 && appController.mediaDuration <= 0)
-            return "—"
+            return ""
         var total = Math.max(0, Math.floor(seconds))
         var hours = Math.floor(total / 3600)
         var minutes = Math.floor((total % 3600) / 60)

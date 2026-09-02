@@ -16,10 +16,12 @@ DEFAULT_SETTINGS: dict[str, Any] = {
         "opacity": 0.90,
         "locked": False,
         "always_on_top": False,
+        "layout_mode": "flow",
         "theme": "dark",
     },
     "media": {
         "visible": True,
+        "always_visible": False,
         "auto_pause": True,
         "auto_resume": False,
     },

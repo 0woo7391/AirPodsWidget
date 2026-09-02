@@ -70,18 +70,31 @@ class MediaService(QObject):
         manager = await SessionManager.request_async()
         last_state: MediaState | None = None
         last_playing_media: tuple[str, str, str] | None = None
+        last_session: Any = None
         while not self._stop.is_set():
-            session = await self._select_session(manager, PlaybackStatus)
+            session = await self._select_session(
+                manager,
+                PlaybackStatus,
+                preferred_session=last_session,
+            )
             await self._drain_commands(session, PlaybackStatus)
             state = await self._read_state(session, PlaybackStatus)
             media_identity = self._media_identity(state)
             if state.playing:
                 last_playing_media = media_identity
+                last_session = session
             elif state.available and media_identity != last_playing_media:
                 # Do not resurrect a paused browser tab that was already old
                 # when the widget started. Browser tabs share one source-app
                 # id, so source + title + artist identify the observed media.
                 state = MediaState()
+            elif state.available:
+                # Keep the last playing session as the control target while it
+                # is paused. Some browser builds temporarily stop returning a
+                # paused session from GetCurrentSession().
+                last_session = session
+            elif session is None:
+                last_session = None
             if state != last_state:
                 last_state = state
                 self.stateReceived.emit(state)
@@ -92,13 +105,18 @@ class MediaService(QObject):
         return (state.source_app, state.title, state.artist)
 
     @staticmethod
-    async def _select_session(manager: Any, playback_status_type: Any) -> Any:
+    async def _select_session(
+        manager: Any,
+        playback_status_type: Any,
+        preferred_session: Any = None,
+    ) -> Any:
         """Prefer the session that is actually playing over stale current metadata.
 
         Windows can keep a paused or stopped browser session as
-        ``get_current_session()`` while another app is actively playing. The
-        media widget should follow the active session and clear itself when no
-        session is playing/paused instead of showing that stale title.
+        ``get_current_session()`` while another app is actively playing. It can
+        also briefly return no paused browser session after a pause command. The
+        media widget follows the active session and uses the last known session
+        as a paused fallback without resurrecting an unrelated old tab.
         """
         try:
             current = manager.get_current_session()
@@ -113,9 +131,12 @@ class MediaService(QObject):
         candidates = []
         if current is not None:
             candidates.append(current)
+        if preferred_session is not None and preferred_session is not current:
+            candidates.append(preferred_session)
         candidates.extend(session for session in sessions if session is not current)
 
         playing = []
+        paused_preferred = None
         paused_current = None
         paused_status = getattr(playback_status_type, "PAUSED", None)
         for session in candidates:
@@ -125,12 +146,15 @@ class MediaService(QObject):
                 continue
             if status == playback_status_type.PLAYING:
                 playing.append(session)
-            elif session is current and paused_status is not None and status == paused_status:
-                paused_current = session
+            elif paused_status is not None and status == paused_status:
+                if session is preferred_session:
+                    paused_preferred = session
+                if session is current:
+                    paused_current = session
 
         if playing:
             return playing[0]
-        return paused_current
+        return paused_preferred or paused_current
 
     async def _drain_commands(self, session: Any, playback_status_type: Any = None) -> None:
         while True:

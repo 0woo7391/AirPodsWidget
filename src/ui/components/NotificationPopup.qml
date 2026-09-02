@@ -52,18 +52,9 @@ Window {
         anchors.fill: parent
         anchors.margins: 8
         radius: theme.cardRadius
-        color: theme.shellColor(theme.widgetSurface, appController.widgetOpacity)
+        color: theme.popoverSurface
         border.width: 1
         border.color: theme.border
-
-        Rectangle {
-            anchors.fill: parent
-            anchors.margins: 1
-            radius: parent.radius - 1
-            color: "transparent"
-            border.width: 1
-            border.color: theme.innerBorder
-        }
 
         Rectangle {
             anchors.left: parent.left
@@ -84,25 +75,25 @@ Window {
             spacing: 12
 
             Rectangle {
-                width: 38; height: 38; radius: 12
+                width: 36; height: 36; radius: 11
                 color: theme.surfaceSubtle
                 border.width: 1
                 border.color: theme.innerBorder
-                Column {
+                MediaIcon {
                     anchors.centerIn: parent
-                    spacing: 3
-                    Rectangle { width: 20; height: 3; radius: 2; color: theme.textPrimary }
-                    Rectangle { width: 15; height: 3; radius: 2; color: theme.textPrimary }
-                    Rectangle { width: 10; height: 3; radius: 2; color: theme.textPrimary }
+                    width: 18
+                    height: 18
+                    icon: "bluetooth"
+                    foreground: theme.textPrimary
                 }
             }
 
             Column {
                 Layout.fillWidth: true
                 spacing: 3
-                Text { text: appController.popupTitle; color: theme.textPrimary; font.family: theme.fontDisplay; font.pixelSize: theme.bodySize; font.weight: theme.titleWeight; elide: Text.ElideRight; width: parent.width }
-                Text { text: appController.popupMessage; color: theme.textPrimary; font.family: theme.fontText; font.pixelSize: theme.labelSize; elide: Text.ElideRight; width: parent.width }
-                Text { text: appController.popupDetail; color: theme.textSecondary; font.family: theme.fontText; font.pixelSize: theme.captionSize; elide: Text.ElideRight; width: parent.width }
+                AnimatedText { text: appController.popupTitle; color: theme.textPrimary; fontFamily: theme.fontDisplay; pixelSize: theme.bodySize; fontWeight: theme.titleWeight; elide: Text.ElideRight; width: parent.width; height: 20; changeDuration: 150 }
+                AnimatedText { text: appController.popupMessage; color: theme.textPrimary; fontFamily: theme.fontText; pixelSize: theme.labelSize; elide: Text.ElideRight; width: parent.width; height: 18; changeDuration: 130 }
+                AnimatedText { text: appController.popupDetail; color: theme.textSecondary; fontFamily: theme.fontText; pixelSize: theme.captionSize; elide: Text.ElideRight; width: parent.width; height: 16; changeDuration: 130 }
             }
         }
     }

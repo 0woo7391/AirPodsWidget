@@ -39,7 +39,9 @@ Window {
         anchors.fill: parent
         anchors.margins: 8
         radius: theme.shellRadius
-        color: theme.shellColor(theme.widgetSurface, 0.88)
+        // Settings prioritizes legibility over the desktop material. The
+        // widget opacity slider still affects only the widget background.
+        color: theme.settingsSurface
         border.width: 1
         border.color: theme.settingsBorder
         clip: true
@@ -98,7 +100,7 @@ Window {
                     Text { text: "위젯"; color: theme.textTertiary; font.family: theme.fontText; font.pixelSize: theme.labelSize; font.weight: theme.labelWeight; font.letterSpacing: 0.6; leftPadding: 2 }
                     Rectangle {
                         Layout.fillWidth: true
-                        Layout.preferredHeight: 264
+                        Layout.preferredHeight: 306
                         radius: theme.cardRadius
                         color: theme.settingsPanel
                         border.width: 1
@@ -123,6 +125,52 @@ Window {
                                 Layout.fillWidth: true
                                 Text { Layout.fillWidth: true; text: "항상 위에 표시"; color: theme.textPrimary; font.family: theme.fontText; font.pixelSize: theme.bodySize }
                                 AppleSwitch { checked: appController.widgetAlwaysOnTop; theme: window.theme; onToggled: function(value) { appController.setWidgetAlwaysOnTop(value) } }
+                            }
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Text { Layout.fillWidth: true; text: "위젯 레이아웃"; color: theme.textPrimary; font.family: theme.fontText; font.pixelSize: theme.bodySize }
+                                Rectangle {
+                                    Layout.preferredWidth: 150
+                                    Layout.preferredHeight: 32
+                                    radius: 11
+                                    color: theme.track
+
+                                    Row {
+                                        anchors.fill: parent
+                                        anchors.margins: 3
+                                        spacing: 3
+
+                                        Repeater {
+                                            model: [
+                                                { label: "흐름형", value: "flow" },
+                                                { label: "컴팩트", value: "compact" }
+                                            ]
+
+                                            delegate: Rectangle {
+                                                required property var modelData
+                                                width: 69
+                                                height: 26
+                                                radius: 8
+                                                color: appController.widgetLayoutMode === modelData.value ? theme.settingsControl : "transparent"
+
+                                                Text {
+                                                    anchors.centerIn: parent
+                                                    text: modelData.label
+                                                    color: appController.widgetLayoutMode === modelData.value ? theme.textPrimary : theme.textSecondary
+                                                    font.family: theme.fontText
+                                                    font.pixelSize: theme.captionSize
+                                                    font.weight: theme.labelWeight
+                                                }
+
+                                                MouseArea {
+                                                    anchors.fill: parent
+                                                    cursorShape: Qt.PointingHandCursor
+                                                    onClicked: appController.setWidgetLayoutMode(modelData.value)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                             }
                             RowLayout {
                                 Layout.fillWidth: true
@@ -161,7 +209,7 @@ Window {
                                     from: 0.55; to: 1; value: appController.widgetOpacity
                                     onMoved: appController.setWidgetOpacity(value)
                                 }
-                                Text { Layout.preferredWidth: 38; horizontalAlignment: Text.AlignRight; text: Math.round(opacitySlider.value * 100) + "%"; color: theme.textSecondary; font.family: theme.fontText; font.pixelSize: theme.captionSize }
+                                AnimatedText { Layout.preferredWidth: 38; Layout.fillHeight: true; horizontalAlignment: Text.AlignRight; text: Math.round(opacitySlider.value * 100) + "%"; color: theme.textSecondary; fontFamily: theme.fontText; pixelSize: theme.captionSize; elide: Text.ElideRight; changeDuration: 90 }
                             }
                             RowLayout {
                                 Layout.fillWidth: true
@@ -173,7 +221,7 @@ Window {
                                     from: 0.7; to: 1.5; value: appController.widgetScale
                                     onMoved: appController.setWidgetScale(value)
                                 }
-                                Text { Layout.preferredWidth: 38; horizontalAlignment: Text.AlignRight; text: Math.round(scaleSlider.value * 100) + "%"; color: theme.textSecondary; font.family: theme.fontText; font.pixelSize: theme.captionSize }
+                                AnimatedText { Layout.preferredWidth: 38; Layout.fillHeight: true; horizontalAlignment: Text.AlignRight; text: Math.round(scaleSlider.value * 100) + "%"; color: theme.textSecondary; fontFamily: theme.fontText; pixelSize: theme.captionSize; elide: Text.ElideRight; changeDuration: 90 }
                             }
                         }
                     }
@@ -209,7 +257,7 @@ Window {
                                     value: appController.batteryThreshold
                                     onMoved: appController.setBatteryThreshold(Math.round(value))
                                 }
-                                Text { Layout.preferredWidth: 48; horizontalAlignment: Text.AlignRight; text: Math.round(thresholdSlider.value) + "% 이하"; color: theme.textSecondary; font.family: theme.fontText; font.pixelSize: theme.captionSize }
+                                AnimatedText { Layout.preferredWidth: 48; Layout.fillHeight: true; horizontalAlignment: Text.AlignRight; text: Math.round(thresholdSlider.value) + "% 이하"; color: theme.textSecondary; fontFamily: theme.fontText; pixelSize: theme.captionSize; elide: Text.ElideRight; changeDuration: 90 }
                             }
 
                             RowLayout {
@@ -223,7 +271,7 @@ Window {
                                     value: appController.alertVolume
                                     onMoved: appController.setAlertVolume(Math.round(value))
                                 }
-                                Text { Layout.preferredWidth: 38; horizontalAlignment: Text.AlignRight; text: Math.round(volumeSlider.value) + "%"; color: theme.textSecondary; font.family: theme.fontText; font.pixelSize: theme.captionSize }
+                                AnimatedText { Layout.preferredWidth: 38; Layout.fillHeight: true; horizontalAlignment: Text.AlignRight; text: Math.round(volumeSlider.value) + "%"; color: theme.textSecondary; fontFamily: theme.fontText; pixelSize: theme.captionSize; elide: Text.ElideRight; changeDuration: 90 }
                             }
 
                             Rectangle {
@@ -235,13 +283,14 @@ Window {
                                 border.color: theme.settingsBorder
                                 scale: testMouse.pressed ? 0.985 : 1
                                 Behavior on scale { NumberAnimation { duration: 120 } }
-                                Text {
+                                AnimatedText {
                                     anchors.centerIn: parent
                                     text: appController.testPlaying ? "■  재생 중" : "▶  테스트 알림"
                                     color: theme.textPrimary
-                                    font.family: theme.fontText
-                                    font.pixelSize: theme.labelSize
-                                    font.weight: theme.labelWeight
+                                    fontFamily: theme.fontText
+                                    pixelSize: theme.labelSize
+                                    fontWeight: theme.labelWeight
+                                    changeDuration: 130
                                 }
                                 MouseArea { id: testMouse; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: appController.testAlert() }
                             }
@@ -251,7 +300,7 @@ Window {
                     Text { text: "미디어"; color: theme.textTertiary; font.family: theme.fontText; font.pixelSize: theme.labelSize; font.weight: theme.labelWeight; font.letterSpacing: 0.6; leftPadding: 2 }
                     Rectangle {
                         Layout.fillWidth: true
-                        Layout.preferredHeight: 144
+                        Layout.preferredHeight: 180
                         radius: theme.cardRadius
                         color: theme.settingsPanel
                         border.width: 1
@@ -264,6 +313,11 @@ Window {
                                 Layout.fillWidth: true
                                 Text { Layout.fillWidth: true; text: "플레이어 표시"; color: theme.textPrimary; font.family: theme.fontText; font.pixelSize: theme.bodySize }
                                 AppleSwitch { checked: appController.mediaVisibleSetting; theme: window.theme; onToggled: function(value) { appController.setMediaVisible(value) } }
+                            }
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Text { Layout.fillWidth: true; text: "미디어 없을 때도 표시"; color: theme.textPrimary; font.family: theme.fontText; font.pixelSize: theme.bodySize }
+                                AppleSwitch { checked: appController.mediaAlwaysVisible; theme: window.theme; onToggled: function(value) { appController.setMediaAlwaysVisible(value) } }
                             }
                             RowLayout {
                                 Layout.fillWidth: true

@@ -1,14 +1,15 @@
 # AirPods Widget for Windows
 
-AirPods Pro 3 상태와 Windows 미디어를 한 카드에서 확인·제어하는 데스크톱 위젯입니다.
+AirPods Pro 3 상태와 Windows 미디어를 한 화면에서 확인·제어하는 데스크톱 위젯입니다.
 별도 Bluetooth 커널 드라이버, Windows Test Mode, Secure Boot 변경, 무음 오디오 반복 재생을
 사용하지 않습니다.
 
 ## 들어간 기능
 
-이번 UI 개편의 단일 기준과 검증 항목은 [UI_REDESIGN_SPEC.md](UI_REDESIGN_SPEC.md)에
-정리되어 있습니다. 해당 문서에는 참고한 Dimension/Transitions.dev 자료와 QML 적용
-규칙, 다크·라이트·미디어 없음 상태의 완료 조건이 함께 기록되어 있습니다.
+이번 UI 개편의 기준과 검증 항목은 [UI_REDESIGN_SPEC.md](UI_REDESIGN_SPEC.md)와
+[UI_V2_DESIGN_BRIEF.md](UI_V2_DESIGN_BRIEF.md)에 정리되어 있습니다. 두 문서에는
+정보 우선 레이아웃, 컴팩트/최소화 모드, 모션 규칙, 다크·라이트·미디어 없음 상태의
+완료 조건이 기록되어 있습니다.
 
 - AirPods Pro 3 자동 감지
 - 왼쪽·오른쪽·케이스 배터리와 애니메이션 막대
@@ -17,19 +18,36 @@ AirPods Pro 3 상태와 Windows 미디어를 한 카드에서 확인·제어하�
 - 현재 미디어 제목·아티스트·앱 표시
 - 긴 제목의 느린 전광판 애니메이션
 - 이전 곡·재생/일시정지·다음 곡
-- 양쪽 이어버드 제거 후 0.6초 확인 뒤 자동 일시정지
+- 신선한 BLE 패킷으로 양쪽 이어버드 제거가 확인된 뒤 0.6초 후 자동 일시정지
 - 데스크톱 위젯과 트레이 팝업 동시 사용
 - 연결 팝업과 저전력 팝업
 - 테두리 없는 창모드를 포함한 게임 프로세스 기반 팝업 차단
 - 사용자가 제공한 MP3 저전력 경고음
 - 알림 볼륨 조절과 테스트 재생
 - 위젯/트레이에서 설정한 출력 장치 아이콘으로 Windows 기본 출력 전환
+- 페어링된 AirPods 출력 버튼을 누르면 Windows 기본 A2DP 오디오 서비스를 재연결한 뒤 출력 전환
 - 미디어 플레이어와 분리된 Windows 기본 출력 볼륨 슬라이더와 수치 표시
 - 설정에서 출력 버튼별 장치 지정·추가·삭제 (최대 3개)
 - 위젯 크기·투명도·위치 잠금·시작 프로그램 설정
 - 위젯 우측 하단 드래그 크기 조절과 전체 UI 비율 자동 맞춤
 - 위젯 항상 위 표시 옵션 (게임 활성 시에는 게임 위를 덮지 않도록 하단 우선)
+- 설정창은 위젯 헤더가 아니라 시스템 트레이 메뉴에서만 엶
 - 데모 모드
+
+재생 중인 미디어는 일시정지해도 플레이어와 재생 버튼을 유지합니다. 버튼은 일시정지 상태에서
+다시 재생 명령을 보냅니다. 페어링된 AirPods가 현재 연결되지 않은 경우 출력 버튼이 사용자 모드
+Windows Bluetooth Audio Sink 재협상을 요청하며, 오디오 엔드포인트가 나타날 때까지 잠시 재시도합니다.
+
+## 화면 모드
+
+- **흐름형**: 배터리, 볼륨, 출력 장치, 미디어를 정보 우선 순서로 표시합니다.
+- **컴팩트형**: 작은 창에 맞춰 배터리 요약·볼륨 trigger·출력 장치·미디어를 압축합니다.
+- **최소화**: 고정된 토글 위치를 기준으로 작은 상태 capsule만 남깁니다. 볼륨 버튼을 누르면
+  부모 위젯을 이동하거나 키우지 않는 세로 볼륨 popover가 열립니다.
+
+접기·복원은 하나의 전환 progress와 고정된 토글 anchor를 사용합니다. 실제 Windows 화면의
+중간 프레임 검증이 필요한 항목은 [UI_REDESIGN_SPEC.md](UI_REDESIGN_SPEC.md)의 완료 조건에
+명시되어 있습니다.
 
 ## 중요한 배터리 제한
 
@@ -58,7 +76,7 @@ runtime, 캡처 PNG, 로그, 인증서, 설정 파일과 재배포 권한을 확
 커밋하지 않습니다.
 
 ```powershell
-git clone <repository-url>
+git clone https://github.com/0woo7391/AirPodsWidget.git
 Set-Location .\AirPodsWidget
 ```
 
@@ -172,6 +190,11 @@ GPL-3.0-or-later. 자세한 내용은 `LICENSE`와 `THIRD_PARTY_NOTICES.md`를 �
 AirPods Pro 3에서 한 번 실행해야만 확정할 수 있습니다. 이 저장소에는 그 확인을 위한 데모 모드와
 로그 경로 안내가 포함되어 있습니다.
 
+현재 자동 검증은 Python 단위 테스트, 프로젝트/QML 정적 검사, 실제 Qt 엔진을 이용한 QML
+오프스크린 상태·중간 프레임 검사로 구성됩니다. 오프스크린 결과만으로 Windows DWM의 실제
+창 합성, 다중 모니터 좌표, Chrome의 실제 미디어 세션, AirPods 재연결까지 보증하지 않습니다.
+검증 기록과 미완료 항목은 [BUILD_REPORT.md](BUILD_REPORT.md)에 남깁니다.
+
 ## 문제 해결
 
 - `ImportError: DLL load failed while importing QtCore`: 시스템 Python으로
@@ -180,6 +203,9 @@ AirPods Pro 3에서 한 번 실행해야만 확정할 수 있습니다. 이 저�
 - `0x800B0109` 또는 게시자 인증서 오류: 서명되지 않은 MSIX를 직접 열지 말고,
   관리자 PowerShell에서 `install_msix.ps1`을 실행합니다. 이 스크립트의 인증서는
   현재 PC의 개발용 자체 서명 인증서이며 공개 배포용 인증서가 아닙니다.
+- `0x80073CFB` 또는 같은 패키지 내용 오류: 앱을 완전히 종료하고, `packaging/AppxManifest.xml`의
+  패키지 버전이 이전 설치본보다 높은지 확인한 뒤 빌드·설치합니다. 필요하면 현재 사용자
+  패키지를 제거하고 다시 설치합니다.
 - 위젯이 보이지 않음: 앱이 트레이에 상주할 수 있으므로 트레이 아이콘을 확인하고,
   `run_demo_windows.bat`으로 UI를 먼저 확인합니다.
 

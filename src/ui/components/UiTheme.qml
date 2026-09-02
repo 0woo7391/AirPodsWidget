@@ -15,6 +15,26 @@ QtObject {
     readonly property int motionFast: 140
     readonly property int motionStandard: 190
     readonly property int motionLayout: 220
+    readonly property int motionWindow: 280
+    // Dropdown-menu-morph timing: both directions leave enough samples for
+    // the window geometry to travel without a mid-transition snap.
+    readonly property int motionMorphOpen: 400
+    readonly property int motionMorphClose: 400
+    readonly property int motionMorphFade: 200
+    // Reveal motion is deliberately restrained; the shell supplies the large
+    // movement, while content only travels a few pixels into place.
+    readonly property int motionMorphSlide: 6
+
+    // Battery rows share these columns in the flow layout. Keeping the
+    // geometry in one place prevents the estimate row and CASE row from
+    // drifting away from L/R when the window is resized.
+    readonly property int batteryLabelColumn: 36
+    readonly property int batteryStatusColumn: 10
+    readonly property int batteryLabelStatusGap: 5
+    readonly property int batteryTrackGap: 6
+    readonly property int batteryValueGap: 8
+    readonly property int batteryValueColumn: 34
+    readonly property int batteryTrackStart: batteryLabelColumn + batteryLabelStatusGap + batteryStatusColumn + batteryTrackGap
 
     // Map the user's background-opacity setting onto a safe material range.
     // The minimum tint preserves contrast on the opposite-color wallpaper;
@@ -85,8 +105,8 @@ QtObject {
             ? materialColor(Qt.rgba(0, 0, 0, 1), opacity, 0.50, 0.62)
             : materialColor(Qt.rgba(0.70, 0.70, 0.70, 1), opacity, 0.04, 0.08)
     }
-    // Dimension tokens adapted to the widget's two themes. The widget uses
-    // the exact neutral palette and keeps color for semantic status only.
+    // The utility palette stays neutral; color is reserved for semantic state
+    // and selection feedback rather than decoration.
     readonly property color surface: dark ? "#D00A0A0A" : "#EAF5F5F5"
     readonly property color surfaceTop: surface
     readonly property color surfaceBottom: surface
@@ -98,7 +118,7 @@ QtObject {
     readonly property color surfaceSubtleTop: surfaceSubtle
     readonly property color surfaceSubtleBottom: surfaceSubtle
     // Settings are information-dense, so they use a regular, more opaque
-    // material while keeping the same Dimension neutral stack.
+    // neutral surface while keeping the same visual language.
     readonly property color settingsSurface: dark ? "#E10A0A0A" : "#F2F5F5F5"
     readonly property color settingsSurfaceTop: settingsSurface
     readonly property color settingsSurfaceBottom: settingsSurface
@@ -108,15 +128,18 @@ QtObject {
     readonly property color settingsBorder: dark ? "#35FFFFFF" : "#40B2B2B2"
     readonly property color settingsControl: dark ? "#18FFFFFF" : "#12000000"
 
-    readonly property color widgetSurface: dark ? "#0A0A0A" : "#F5F5F5"
+    readonly property color widgetSurface: dark ? "#161717" : "#F4F4F1"
     readonly property color widgetSurfaceTop: widgetSurface
     readonly property color widgetSurfaceBottom: widgetSurface
-    readonly property color widgetPanel: dark ? "#161616" : "#FFFFFF"
+    readonly property color widgetPanel: dark ? "#1C1D1D" : "#FFFFFF"
     readonly property color widgetPanelTop: widgetPanel
     readonly property color widgetPanelBottom: widgetPanel
-    readonly property color widgetInset: dark ? "#161616" : "#FFFFFF"
+    readonly property color widgetInset: dark ? "#1B1C1C" : "#FFFFFF"
     readonly property color widgetInsetTop: widgetInset
     readonly property color widgetInsetBottom: widgetInset
+    // Popovers sit on top of live content, so they need a readable surface of
+    // their own instead of allowing the underlying numbers to bleed through.
+    readonly property color popoverSurface: dark ? "#F12A2A2A" : "#F9F9F5"
     readonly property color border: dark ? "#38FFFFFF" : "#40B2B2B2"
     readonly property color innerBorder: dark ? "#18FFFFFF" : "#35FFFFFF"
     readonly property color sectionBorder: dark ? "#32D4D4D4" : "#4CB2B2B2"
@@ -128,7 +151,7 @@ QtObject {
     readonly property color accent: dark ? "#FFFFFF" : "#0A0A0A"
     readonly property color accentSoft: dark ? "#24FFFFFF" : "#180A0A0A"
     readonly property color green: dark ? "#4ADE80" : "#22A55A"
-    readonly property color yellow: dark ? "#F2C14E" : "#B77A16"
+    readonly property color yellow: dark ? "#F2C14E" : "#A66B08"
     readonly property color batteryHealthy: dark ? "#BBDCC6" : "#2E7A4D"
     readonly property color orange: dark ? "#E59A3A" : "#B86A18"
     readonly property color red: dark ? "#F07171" : "#C23B3B"

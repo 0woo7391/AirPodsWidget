@@ -74,6 +74,7 @@ def apply_window_shape(window: Any) -> bool:
         height = max(1, int(window.height()))
         inset = max(0, int(window.property("materialInset") or 0))
         radius = max(1, int(window.property("materialCornerRadius") or 32))
+        radius = min(radius, max(1, min(width, height) // 2))
     except (AttributeError, TypeError, ValueError, OSError):
         return False
     if not hwnd:

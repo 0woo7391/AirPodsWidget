@@ -5,8 +5,10 @@ Rectangle {
     property string text: ""
     property string iconName: ""
     property string displayedIcon: iconName
+    property real iconProgress: 0
     property bool primary: false
     property UiTheme theme
+    property string nextIcon: ""
     signal clicked()
 
     implicitWidth: 42
@@ -30,9 +32,21 @@ Rectangle {
         height: width
 
         MediaIcon {
+            id: currentIcon
             anchors.fill: parent
             visible: root.iconName.length > 0
             icon: root.displayedIcon
+            progress: root.iconProgress
+            foreground: root.primary ? (root.theme.dark ? "#151517" : "white") : root.theme.textPrimary
+        }
+
+        MediaIcon {
+            id: incomingIcon
+            anchors.fill: parent
+            visible: root.nextIcon.length > 0
+            opacity: 0
+            icon: root.nextIcon
+            progress: root.iconProgress
             foreground: root.primary ? (root.theme.dark ? "#151517" : "white") : root.theme.textPrimary
         }
 
@@ -50,9 +64,25 @@ Rectangle {
 
     SequentialAnimation {
         id: iconSwap
-        NumberAnimation { target: iconHolder; property: "opacity"; to: 0; duration: 85; easing.type: Easing.InCubic }
-        ScriptAction { script: root.displayedIcon = root.iconName }
-        NumberAnimation { target: iconHolder; property: "opacity"; to: 1; duration: 135; easing.type: Easing.OutCubic }
+        ScriptAction {
+            script: {
+                root.nextIcon = root.iconName
+                currentIcon.opacity = 1
+                incomingIcon.opacity = 0
+            }
+        }
+        ParallelAnimation {
+            NumberAnimation { target: currentIcon; property: "opacity"; to: 0; duration: 90; easing.type: Easing.InOutCubic }
+            NumberAnimation { target: incomingIcon; property: "opacity"; to: 1; duration: 90; easing.type: Easing.InOutCubic }
+        }
+        ScriptAction {
+            script: {
+                root.displayedIcon = root.nextIcon
+                root.nextIcon = ""
+                currentIcon.opacity = 1
+                incomingIcon.opacity = 0
+            }
+        }
     }
 
     onIconNameChanged: {

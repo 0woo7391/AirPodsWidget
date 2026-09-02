@@ -58,7 +58,12 @@ class AirPodsState:
     rssi: int = -127
     detected: bool = False
     connected: bool = False
-    device_name: str = "AirPods Pro 3"
+    # False means the in-ear flags were cleared because BLE advertisements
+    # expired, not because a fresh packet reported removal.
+    in_ear_fresh: bool = True
+    # The UI supplies a neutral empty-state label until a real advertisement
+    # identifies the device. Never pretend that a stale model name is present.
+    device_name: str = ""
 
     @property
     def any_in_ear(self) -> bool:

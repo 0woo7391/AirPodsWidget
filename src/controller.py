@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import logging
 import sys
+import threading
 from pathlib import Path
 
-from PySide6.QtCore import QPoint, Property, QObject, QTimer, Signal, Slot
+from PySide6.QtCore import QPoint, Property, QObject, QRect, QTimer, Signal, Slot
 from PySide6.QtGui import QColor, QCursor, QGuiApplication, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
@@ -24,7 +25,11 @@ from services.audio_output import (
     set_volume,
 )
 from services.ble_service import BleService
-from services.bluetooth_status import find_airpods_status
+from services.bluetooth_status import (
+    BluetoothConnectionError,
+    find_airpods_status,
+    reconnect_paired_audio,
+)
 from services.game_detector import is_game_foreground
 from services.low_battery import LowBatteryPolicy
 from services.media_service import MediaService
@@ -50,6 +55,12 @@ class AppController(QObject):
     testPlayingChanged = Signal()
     scannerRunningChanged = Signal()
     audioChanged = Signal()
+    audioReconnectFinished = Signal(str, int, bool, str)
+    audioReconnectPollFinished = Signal(str, int, bool, str)
+    audioRefreshFinished = Signal(int, object, str)
+    audioVolumeRefreshFinished = Signal(int, int, str)
+    audioSwitchFinished = Signal(str, int, bool, str)
+    audioVolumeSetFinished = Signal(int, int, bool, str)
     gameChanged = Signal()
 
     showTrayPopupRequested = Signal(int, int)
@@ -88,6 +99,20 @@ class AppController(QObject):
         self._audio_volume_available = False
         self._audio_devices_signature: tuple[tuple[str, str], ...] = ()
         self._audio_feedback = ""
+        self._audio_refresh_generation = 0
+        self._audio_refresh_busy = False
+        self._audio_refresh_thread: threading.Thread | None = None
+        self._audio_volume_refresh_generation = 0
+        self._audio_volume_refresh_busy = False
+        self._audio_volume_refresh_thread: threading.Thread | None = None
+        self._audio_volume_set_token = 0
+        self._audio_volume_set_busy = False
+        self._audio_volume_set_pending: int | None = None
+        self._audio_volume_set_thread: threading.Thread | None = None
+        self._audio_switch_token = 0
+        self._audio_switch_busy = False
+        self._audio_switch_device_id = ""
+        self._audio_switch_thread: threading.Thread | None = None
         self._demo_mode = "--demo" in sys.argv
         self._demo_step = 0
         self._game_foreground = False
@@ -145,6 +170,23 @@ class AppController(QObject):
         self._audio_feedback_timer.setInterval(1400)
         self._audio_feedback_timer.timeout.connect(self._clear_audio_feedback)
 
+        self._pending_audio_output_id = ""
+        self._pending_audio_output_attempts = 0
+        self._audio_reconnect_generation = 0
+        self._audio_reconnect_thread: threading.Thread | None = None
+        self._audio_reconnect_poll_token = 0
+        self._audio_reconnect_poll_busy = False
+        self._audio_reconnect_poll_thread: threading.Thread | None = None
+        self._audio_reconnect_timer = QTimer(self)
+        self._audio_reconnect_timer.setInterval(350)
+        self._audio_reconnect_timer.timeout.connect(self._retry_pending_audio_output)
+        self.audioReconnectFinished.connect(self._on_audio_reconnect_finished)
+        self.audioReconnectPollFinished.connect(self._on_audio_reconnect_poll_finished)
+        self.audioRefreshFinished.connect(self._on_audio_refresh_finished)
+        self.audioVolumeRefreshFinished.connect(self._on_audio_volume_refresh_finished)
+        self.audioSwitchFinished.connect(self._on_audio_switch_finished)
+        self.audioVolumeSetFinished.connect(self._on_audio_volume_set_finished)
+
         self._settings_save_timer = QTimer(self)
         self._settings_save_timer.setSingleShot(True)
         self._settings_save_timer.setInterval(300)
@@ -160,6 +202,7 @@ class AppController(QObject):
         if self._demo_mode:
             self._start_demo()
             return
+        self._sync_startup_registration()
         self._audio_timer.start()
         self._audio_volume_timer.start()
         self.ble.start()
@@ -167,12 +210,52 @@ class AppController(QObject):
         self._bluetooth_timer.start()
         self._poll_bluetooth_connection()
 
+    def _sync_startup_registration(self) -> None:
+        """Repair the startup entry after an update or package reinstall."""
+        try:
+            set_start_with_windows(self.startWithWindows)
+        except OSError as exc:
+            LOGGER.warning("Could not synchronize Windows startup entry: %s", exc)
+
     def shutdown(self) -> None:
         self._usage_timer.stop()
         self._bluetooth_timer.stop()
         self._audio_timer.stop()
         self._audio_volume_timer.stop()
         self._audio_feedback_timer.stop()
+        self._audio_reconnect_timer.stop()
+        self._pending_audio_output_id = ""
+        self._audio_switch_device_id = ""
+        self._audio_reconnect_generation += 1
+        self._audio_reconnect_poll_token += 1
+        self._audio_refresh_generation += 1
+        self._audio_volume_refresh_generation += 1
+        self._audio_volume_set_token += 1
+        self._audio_switch_token += 1
+        reconnect_thread = self._audio_reconnect_thread
+        if reconnect_thread and reconnect_thread.is_alive():
+            reconnect_thread.join(timeout=0.25)
+        self._audio_reconnect_thread = None
+        poll_thread = self._audio_reconnect_poll_thread
+        if poll_thread and poll_thread.is_alive():
+            poll_thread.join(timeout=0.25)
+        self._audio_reconnect_poll_thread = None
+        refresh_thread = self._audio_refresh_thread
+        if refresh_thread and refresh_thread.is_alive():
+            refresh_thread.join(timeout=0.25)
+        self._audio_refresh_thread = None
+        volume_refresh_thread = self._audio_volume_refresh_thread
+        if volume_refresh_thread and volume_refresh_thread.is_alive():
+            volume_refresh_thread.join(timeout=0.25)
+        self._audio_volume_refresh_thread = None
+        volume_set_thread = self._audio_volume_set_thread
+        if volume_set_thread and volume_set_thread.is_alive():
+            volume_set_thread.join(timeout=0.25)
+        self._audio_volume_set_thread = None
+        switch_thread = self._audio_switch_thread
+        if switch_thread and switch_thread.is_alive():
+            switch_thread.join(timeout=0.25)
+        self._audio_switch_thread = None
         self.usage.update(False)
         self.usage.save()
         self._settings_save_timer.stop()
@@ -185,7 +268,15 @@ class AppController(QObject):
     # --- AirPods properties -------------------------------------------------
     @Property(str, notify=airpodsChanged)
     def deviceName(self) -> str:
-        return self._connected_device_name or self._airpods.device_name or "AirPods Pro 3"
+        if not (self._airpods.connected or self._airpods.detected):
+            return ""
+        # A disconnected/undetected widget must not invent a model name. The
+        # QML header supplies the neutral empty indicator for this slot.
+        return self._connected_device_name or self._airpods.device_name or ""
+
+    @Property(bool, notify=airpodsChanged)
+    def deviceAvailable(self) -> bool:
+        return self._airpods.connected or self._airpods.detected
 
     @Property(bool, notify=airpodsChanged)
     def connected(self) -> bool:
@@ -280,6 +371,13 @@ class AppController(QObject):
             name = output.name if output else config.get("name", "")
             kind = output.kind if output else config.get("kind", "speaker")
             paired_airpods = kind == "airpods" and self._airpods_paired
+            pending = bool(
+                device_id
+                and (
+                    device_id == self._pending_audio_output_id
+                    or device_id == self._audio_switch_device_id
+                )
+            )
             buttons.append(
                 {
                     "index": index,
@@ -290,6 +388,7 @@ class AppController(QObject):
                         device_id
                         and (device_id in active_ids or paired_airpods)
                     ),
+                    "pending": pending,
                     "current": bool(output and device_id == self._audio_output_id),
                 }
             )
@@ -372,6 +471,17 @@ class AppController(QObject):
     def updateWindowShape(self, window: QObject) -> None:
         apply_window_shape(window)
 
+    @Slot(QObject, int, int, int, int)
+    def applyWindowGeometry(
+        self, window: QObject, x: int, y: int, width: int, height: int
+    ) -> None:
+        """Apply one native geometry frame and its rounded region together."""
+        try:
+            window.setGeometry(QRect(int(x), int(y), max(1, int(width)), max(1, int(height))))
+            apply_window_shape(window)
+        except (AttributeError, TypeError, ValueError, OSError):
+            LOGGER.exception("Could not apply widget geometry frame")
+
     # --- Settings -----------------------------------------------------------
     @Property(bool, notify=settingsChanged)
     def widgetVisible(self) -> bool:
@@ -394,6 +504,11 @@ class AppController(QObject):
     @Property(float, notify=settingsChanged)
     def widgetScale(self) -> float:
         return float(self.settings.get("widget", "scale", 1.0))
+
+    @Property(str, notify=settingsChanged)
+    def widgetLayoutMode(self) -> str:
+        mode = str(self.settings.get("widget", "layout_mode", "flow"))
+        return mode if mode in {"flow", "compact"} else "flow"
 
     @Property(bool, notify=gameChanged)
     def gameActive(self) -> bool:
@@ -429,6 +544,10 @@ class AppController(QObject):
     @Property(bool, notify=settingsChanged)
     def mediaVisibleSetting(self) -> bool:
         return bool(self.settings.get("media", "visible", True))
+
+    @Property(bool, notify=settingsChanged)
+    def mediaAlwaysVisible(self) -> bool:
+        return bool(self.settings.get("media", "always_visible", False))
 
     @Property(bool, notify=settingsChanged)
     def autoPause(self) -> bool:
@@ -525,29 +644,27 @@ class AppController(QObject):
             self.audioChanged.emit()
             return
 
-        try:
-            outputs = active_outputs()
-            current = current_output()
-            if current.is_airpods:
-                target = find_speaker(outputs, exclude_id=current.device_id)
-            else:
-                target = find_airpods(outputs)
-            if target is None:
-                self._set_audio_feedback("전환할 장치 없음")
-                return
-            set_default_output(target.device_id)
-            self._set_audio_feedback("출력 전환됨")
-            self._refresh_audio_output()
-        except AudioOutputError as exc:
-            LOGGER.warning("Audio output switch failed: %s", exc)
-            self._set_audio_feedback("전환하지 못함")
-        except Exception:
-            LOGGER.exception("Unexpected audio output switch failure")
-            self._set_audio_feedback("전환하지 못함")
+        if self._audio_switch_busy:
+            return
+        self._audio_switch_token += 1
+        token = self._audio_switch_token
+        self._audio_switch_busy = True
+        self._set_audio_feedback("출력 전환 중")
+        worker = threading.Thread(
+            target=self._toggle_audio_output_worker,
+            args=(token,),
+            name="WindowsAudioSwitch",
+            daemon=True,
+        )
+        self._audio_switch_thread = worker
+        worker.start()
 
     @Slot(str)
     def selectAudioOutput(self, device_id: str) -> None:
         if not device_id:
+            return
+        self._cancel_pending_audio_reconnect()
+        if self._audio_switch_busy:
             return
         if self._demo_mode:
             output = next((item for item in self._audio_known_outputs if item.device_id == device_id), None)
@@ -583,9 +700,16 @@ class AppController(QObject):
             if output is None and not paired_airpods:
                 self._set_audio_feedback("연결되지 않음")
                 return
-            set_default_output(output.device_id if output is not None else device_id)
-            self._set_audio_feedback("출력 전환됨")
-            self._refresh_audio_output()
+
+            active_ids = {item.device_id for item in self._audio_outputs}
+            if paired_airpods and device_id not in active_ids:
+                self._start_audio_reconnect(device_id)
+                return
+
+            self._start_audio_output_switch(output.device_id if output is not None else device_id)
+        except BluetoothConnectionError as exc:
+            LOGGER.warning("Paired Bluetooth audio reconnect failed: %s", exc)
+            self._set_audio_feedback("연결하지 못함")
         except AudioOutputError as exc:
             LOGGER.warning("Audio output switch failed: %s", exc)
             self._set_audio_feedback("전환하지 못함")
@@ -602,12 +726,12 @@ class AppController(QObject):
             self._audio_volume = value
             self.audioChanged.emit()
             return
-        try:
-            set_volume(value)
-            self._audio_volume = value
-            self.audioChanged.emit()
-        except Exception:
-            LOGGER.exception("Audio volume update failed")
+        # Reflect the pointer immediately; the potentially blocking Core
+        # Audio write is coalesced and performed away from the Qt thread.
+        self._audio_volume = value
+        self._audio_volume_set_pending = value
+        self.audioChanged.emit()
+        self._start_pending_audio_volume_write()
 
     @Slot(int, str)
     def setAudioOutputButton(self, index: int, device_id: str) -> None:
@@ -678,6 +802,13 @@ class AppController(QObject):
         self.settingsChanged.emit()
 
     @Slot(str)
+    def setWidgetLayoutMode(self, value: str) -> None:
+        if value not in {"flow", "compact"}:
+            return
+        self.settings.set("widget", "layout_mode", value)
+        self.settingsChanged.emit()
+
+    @Slot(str)
     def setTheme(self, value: str) -> None:
         if value not in {"dark", "light"}:
             return
@@ -723,6 +854,11 @@ class AppController(QObject):
         self.settings.set("media", "visible", value)
         self.settingsChanged.emit()
         self.mediaChanged.emit()
+
+    @Slot(bool)
+    def setMediaAlwaysVisible(self, value: bool) -> None:
+        self.settings.set("media", "always_visible", bool(value))
+        self.settingsChanged.emit()
 
     @Slot(bool)
     def setAutoPause(self, value: bool) -> None:
@@ -815,64 +951,46 @@ class AppController(QObject):
         self._audio_button_configs = configs
 
     def _refresh_audio_output(self) -> None:
-        if self._demo_mode:
+        if self._demo_mode or self._audio_refresh_busy:
             return
+        self._audio_refresh_generation += 1
+        generation = self._audio_refresh_generation
+        self._audio_refresh_busy = True
+        worker = threading.Thread(
+            target=self._audio_output_refresh_worker,
+            args=(generation,),
+            name="WindowsAudioRefresh",
+            daemon=True,
+        )
+        self._audio_refresh_thread = worker
+        worker.start()
+
+    def _audio_output_refresh_worker(self, generation: int) -> None:
         try:
             current = current_output()
             outputs = active_outputs()
             remembered_outputs = known_outputs()
-            self._audio_outputs = outputs
-            self._audio_known_outputs = remembered_outputs
-            setup_outputs = list(outputs)
-            paired_airpods = find_airpods(remembered_outputs)
-            if (
-                self._airpods_paired
-                and paired_airpods is not None
-                and all(item.device_id != paired_airpods.device_id for item in setup_outputs)
-            ):
-                setup_outputs.append(paired_airpods)
-            self._ensure_audio_button_configs(setup_outputs)
             volume = current_volume()
-            device_signature = tuple(
-                (item.device_id, item.name) for item in remembered_outputs
-            )
-            if current.is_airpods:
-                target = find_speaker(outputs, exclude_id=current.device_id)
-            else:
-                target = find_airpods(outputs)
-            values = (
-                current.device_id,
-                current.name,
-                current.is_airpods,
-                target.device_id if target else "",
-                target.name if target else "",
-                volume,
-                device_signature,
-            )
-            previous = (
-                self._audio_output_id,
-                self._audio_output_name,
-                self._audio_output_is_airpods,
-                self._audio_target_id,
-                self._audio_target_name,
-                self._audio_volume,
-                self._audio_devices_signature,
-            )
-            (
-                self._audio_output_id,
-                self._audio_output_name,
-                self._audio_output_is_airpods,
-                self._audio_target_id,
-                self._audio_target_name,
-                self._audio_volume,
-                self._audio_devices_signature,
-            ) = values
-            self._audio_output_available = True
-            self._audio_volume_available = True
-            if values != previous:
-                self.audioChanged.emit()
-        except Exception:
-            LOGGER.exception("Audio output refresh failed")
+        except Exception as exc:
+            self.audioRefreshFinished.emit(generation, None, str(exc))
+            return
+
+        self.audioRefreshFinished.emit(
+            generation,
+            (current, outputs, remembered_outputs, volume),
+            "",
+        )
+
+    @Slot(int, object, str)
+    def _on_audio_refresh_finished(
+        self, generation: int, snapshot: object, error: str
+    ) -> None:
+        if generation != self._audio_refresh_generation:
+            return
+        self._audio_refresh_busy = False
+        self._audio_refresh_thread = None
+        if error or not isinstance(snapshot, tuple) or len(snapshot) != 4:
+            LOGGER.warning("Audio output refresh failed: %s", error or "invalid snapshot")
             if (
                 self._audio_output_name != "오디오 출력 확인 불가"
                 or self._audio_output_available
@@ -886,18 +1004,197 @@ class AppController(QObject):
                 self._audio_target_id = ""
                 self._audio_target_name = ""
                 self.audioChanged.emit()
+            return
+
+        current, outputs, remembered_outputs, volume = snapshot
+        self._audio_outputs = outputs
+        self._audio_known_outputs = remembered_outputs
+        setup_outputs = list(outputs)
+        paired_airpods = find_airpods(remembered_outputs)
+        if (
+            self._airpods_paired
+            and paired_airpods is not None
+            and all(item.device_id != paired_airpods.device_id for item in setup_outputs)
+        ):
+            setup_outputs.append(paired_airpods)
+        self._ensure_audio_button_configs(setup_outputs)
+        device_signature = tuple(
+            (item.device_id, item.name) for item in remembered_outputs
+        )
+        if current.is_airpods:
+            target = find_speaker(outputs, exclude_id=current.device_id)
+        else:
+            target = find_airpods(outputs)
+        values = (
+            current.device_id,
+            current.name,
+            current.is_airpods,
+            target.device_id if target else "",
+            target.name if target else "",
+            volume,
+            device_signature,
+        )
+        previous = (
+            self._audio_output_id,
+            self._audio_output_name,
+            self._audio_output_is_airpods,
+            self._audio_target_id,
+            self._audio_target_name,
+            self._audio_volume,
+            self._audio_devices_signature,
+        )
+        (
+            self._audio_output_id,
+            self._audio_output_name,
+            self._audio_output_is_airpods,
+            self._audio_target_id,
+            self._audio_target_name,
+            self._audio_volume,
+            self._audio_devices_signature,
+        ) = values
+        self._audio_output_available = True
+        self._audio_volume_available = True
+        if values != previous:
+            self.audioChanged.emit()
 
     def _refresh_audio_volume(self) -> None:
         """Refresh only the scalar volume without re-enumerating endpoints."""
-        if self._demo_mode or not self._audio_volume_available:
+        if (
+            self._demo_mode
+            or not self._audio_volume_available
+            or self._audio_volume_refresh_busy
+        ):
             return
+        self._audio_volume_refresh_generation += 1
+        generation = self._audio_volume_refresh_generation
+        self._audio_volume_refresh_busy = True
+        worker = threading.Thread(
+            target=self._audio_volume_refresh_worker,
+            args=(generation,),
+            name="WindowsAudioVolumeRefresh",
+            daemon=True,
+        )
+        self._audio_volume_refresh_thread = worker
+        worker.start()
+
+    def _audio_volume_refresh_worker(self, generation: int) -> None:
         try:
             volume = current_volume()
-        except Exception:
+        except Exception as exc:
+            self.audioVolumeRefreshFinished.emit(generation, -1, str(exc))
+            return
+        self.audioVolumeRefreshFinished.emit(generation, volume, "")
+
+    @Slot(int, int, str)
+    def _on_audio_volume_refresh_finished(
+        self, generation: int, volume: int, error: str
+    ) -> None:
+        if generation != self._audio_volume_refresh_generation:
+            return
+        self._audio_volume_refresh_busy = False
+        self._audio_volume_refresh_thread = None
+        if error or volume < 0:
             return
         if volume != self._audio_volume:
             self._audio_volume = volume
             self.audioChanged.emit()
+
+    def _start_pending_audio_volume_write(self) -> None:
+        if self._audio_volume_set_busy or self._audio_volume_set_pending is None:
+            return
+        value = self._audio_volume_set_pending
+        self._audio_volume_set_pending = None
+        self._audio_volume_set_token += 1
+        token = self._audio_volume_set_token
+        self._audio_volume_set_busy = True
+        worker = threading.Thread(
+            target=self._audio_volume_write_worker,
+            args=(value, token),
+            name="WindowsAudioVolumeWrite",
+            daemon=True,
+        )
+        self._audio_volume_set_thread = worker
+        worker.start()
+
+    def _audio_volume_write_worker(self, value: int, token: int) -> None:
+        try:
+            set_volume(value)
+        except Exception as exc:
+            self.audioVolumeSetFinished.emit(value, token, False, str(exc))
+            return
+        self.audioVolumeSetFinished.emit(value, token, True, "")
+
+    @Slot(int, int, bool, str)
+    def _on_audio_volume_set_finished(
+        self, value: int, token: int, success: bool, error: str
+    ) -> None:
+        if token != self._audio_volume_set_token:
+            return
+        self._audio_volume_set_busy = False
+        self._audio_volume_set_thread = None
+        if not success:
+            LOGGER.warning("Audio volume update failed: %s", error)
+        self._start_pending_audio_volume_write()
+
+    def _start_audio_output_switch(self, device_id: str) -> None:
+        if not device_id or self._audio_switch_busy:
+            return
+        self._audio_switch_token += 1
+        token = self._audio_switch_token
+        self._audio_switch_busy = True
+        self._audio_switch_device_id = device_id
+        self._set_audio_feedback("출력 전환 중")
+        worker = threading.Thread(
+            target=self._audio_output_switch_worker,
+            args=(device_id, token),
+            name="WindowsAudioSwitch",
+            daemon=True,
+        )
+        self._audio_switch_thread = worker
+        worker.start()
+
+    def _audio_output_switch_worker(self, device_id: str, token: int) -> None:
+        try:
+            set_default_output(device_id)
+        except Exception as exc:
+            self.audioSwitchFinished.emit(device_id, token, False, str(exc))
+            return
+        self.audioSwitchFinished.emit(device_id, token, True, "")
+
+    def _toggle_audio_output_worker(self, token: int) -> None:
+        try:
+            outputs = active_outputs()
+            current = current_output()
+            if current.is_airpods:
+                target = find_speaker(outputs, exclude_id=current.device_id)
+            else:
+                target = find_airpods(outputs)
+            if target is None:
+                raise AudioOutputError("No alternate audio output is active")
+            set_default_output(target.device_id)
+        except Exception as exc:
+            self.audioSwitchFinished.emit("", token, False, str(exc))
+            return
+        self.audioSwitchFinished.emit(target.device_id, token, True, "")
+
+    @Slot(str, int, bool, str)
+    def _on_audio_switch_finished(
+        self, device_id: str, token: int, success: bool, error: str
+    ) -> None:
+        if token != self._audio_switch_token:
+            return
+        self._audio_switch_busy = False
+        self._audio_switch_device_id = ""
+        self._audio_switch_thread = None
+        if success:
+            self._set_audio_feedback("출력 전환됨")
+            self._refresh_audio_output()
+            return
+        if "No alternate audio output" in error:
+            self._set_audio_feedback("전환할 장치 없음")
+        else:
+            LOGGER.warning("Audio output switch failed: %s", error)
+            self._set_audio_feedback("전환하지 못함")
 
     def _selectable_audio_outputs(self) -> list[AudioOutput]:
         """Keep settings useful without exposing every stale Windows endpoint."""
@@ -929,6 +1226,117 @@ class AppController(QObject):
         if self._audio_feedback:
             self._audio_feedback = ""
             self.audioChanged.emit()
+
+    def _cancel_pending_audio_reconnect(self) -> None:
+        self._audio_reconnect_timer.stop()
+        self._pending_audio_output_id = ""
+        self._pending_audio_output_attempts = 0
+        self._audio_reconnect_generation = getattr(self, "_audio_reconnect_generation", 0) + 1
+        self._audio_reconnect_poll_token = getattr(self, "_audio_reconnect_poll_token", 0) + 1
+
+    def _start_audio_reconnect(self, device_id: str) -> None:
+        """Reconnect a paired AirPods endpoint away from the Qt UI thread."""
+        self._audio_reconnect_generation = getattr(self, "_audio_reconnect_generation", 0) + 1
+        generation = self._audio_reconnect_generation
+        self._pending_audio_output_id = device_id
+        self._pending_audio_output_attempts = 0
+        self._set_audio_feedback("AirPods 연결 중")
+        self.audioChanged.emit()
+
+        worker = threading.Thread(
+            target=self._audio_reconnect_worker,
+            args=(device_id, generation),
+            name="AirPodsAudioReconnect",
+            daemon=True,
+        )
+        self._audio_reconnect_thread = worker
+        worker.start()
+
+    def _audio_reconnect_worker(self, device_id: str, generation: int) -> None:
+        try:
+            status = find_airpods_status()
+            if status is None or not status.paired:
+                raise BluetoothConnectionError("No paired Bluetooth audio device was found")
+            reconnect_paired_audio(status)
+        except Exception as exc:
+            self.audioReconnectFinished.emit(device_id, generation, False, str(exc))
+            return
+        self.audioReconnectFinished.emit(device_id, generation, True, "")
+
+    @Slot(str, int, bool, str)
+    def _on_audio_reconnect_finished(
+        self, device_id: str, generation: int, success: bool, error: str
+    ) -> None:
+        if generation != getattr(self, "_audio_reconnect_generation", 0):
+            return
+        if device_id != self._pending_audio_output_id:
+            return
+        self._audio_reconnect_thread = None
+        if not success:
+            LOGGER.warning("Paired Bluetooth audio reconnect failed: %s", error)
+            self._cancel_pending_audio_reconnect()
+            self._set_audio_feedback("연결하지 못함")
+            return
+        # Let Windows publish the newly-created endpoint before polling it.
+        # The first poll used to run synchronously from the click handler and
+        # made the widget appear frozen while COM enumerated audio devices.
+        self._audio_reconnect_timer.start()
+        self.audioChanged.emit()
+
+    def _retry_pending_audio_output(self) -> None:
+        device_id = self._pending_audio_output_id
+        if not device_id:
+            self._audio_reconnect_timer.stop()
+            return
+        if self._audio_reconnect_poll_busy:
+            return
+
+        self._pending_audio_output_attempts += 1
+        self._audio_reconnect_poll_token += 1
+        token = self._audio_reconnect_poll_token
+        self._audio_reconnect_poll_busy = True
+        worker = threading.Thread(
+            target=self._audio_reconnect_poll_worker,
+            args=(device_id, token),
+            name="AirPodsAudioEndpointPoll",
+            daemon=True,
+        )
+        self._audio_reconnect_poll_thread = worker
+        worker.start()
+
+    def _audio_reconnect_poll_worker(self, device_id: str, token: int) -> None:
+        try:
+            outputs = active_outputs()
+            if not any(item.device_id == device_id for item in outputs):
+                self.audioReconnectPollFinished.emit(device_id, token, False, "endpoint pending")
+                return
+            set_default_output(device_id)
+        except Exception as exc:
+            self.audioReconnectPollFinished.emit(device_id, token, False, str(exc))
+            return
+        self.audioReconnectPollFinished.emit(device_id, token, True, "")
+
+    @Slot(str, int, bool, str)
+    def _on_audio_reconnect_poll_finished(
+        self, device_id: str, token: int, success: bool, error: str
+    ) -> None:
+        if token != self._audio_reconnect_poll_token:
+            return
+        self._audio_reconnect_poll_busy = False
+        self._audio_reconnect_poll_thread = None
+        if device_id != self._pending_audio_output_id:
+            return
+        if success:
+            self._cancel_pending_audio_reconnect()
+            self._set_audio_feedback("출력 전환됨")
+            self._refresh_audio_output()
+            return
+
+        if error and error != "endpoint pending":
+            LOGGER.debug("Waiting for paired audio endpoint %s: %s", device_id, error)
+        if self._pending_audio_output_attempts >= 18:
+            self._cancel_pending_audio_reconnect()
+            self._set_audio_feedback("연결하지 못함")
 
     def _on_airpods_state(self, state: AirPodsState) -> None:
         state.connected = self._airpods.connected
@@ -962,7 +1370,13 @@ class AppController(QObject):
         self._ear_generation += 1
         generation = self._ear_generation
 
-        if previous_any and not current_any and self.settings.get("media", "auto_pause", True):
+        if (
+            previous_any
+            and not current_any
+            and self._airpods.in_ear_fresh
+            and self._airpods.connected
+            and self.settings.get("media", "auto_pause", True)
+        ):
             QTimer.singleShot(600, lambda: self._confirm_auto_pause(generation))
         elif (
             not previous_both
@@ -973,7 +1387,13 @@ class AppController(QObject):
             QTimer.singleShot(800, lambda: self._confirm_auto_resume(generation))
 
     def _confirm_auto_pause(self, generation: int) -> None:
-        if generation == self._ear_generation and not self._airpods.any_in_ear and self._media.playing:
+        if (
+            generation == self._ear_generation
+            and self._airpods.in_ear_fresh
+            and self._airpods.connected
+            and not self._airpods.any_in_ear
+            and self._media.playing
+        ):
             self.media.pause()
             self._paused_by_ear_detection = True
 
@@ -1172,7 +1592,6 @@ class AppController(QObject):
         self._demo_step += 1
         if self._demo_step % 2:
             self._airpods.left.battery.percent = max(0, (self._airpods.left.battery.percent or 0) - 1)
-            self._media.playing = not self._media.playing
         else:
             self._airpods.right.battery.percent = max(0, (self._airpods.right.battery.percent or 0) - 1)
             self._media.title = (
@@ -1203,7 +1622,7 @@ class AppController(QObject):
 
     def _on_tray_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
         if reason == QSystemTrayIcon.Trigger:
-            height = 528 if self.mediaAvailable else 394
+            height = 476 if self.mediaAvailable else 322
             popup_x, popup_y = self._tray_popup_position(360, height)
             self.showTrayPopupRequested.emit(popup_x, popup_y)
 
