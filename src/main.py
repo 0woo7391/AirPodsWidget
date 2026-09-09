@@ -73,12 +73,15 @@ def _configure_qt_dll_search_path() -> None:
 _relaunch_with_project_venv()
 _configure_qt_dll_search_path()
 
-# This is part of the application itself. It runs before controller/QML import
-# so the same right-middle primary anchor and deterministic AirPods identity
-# rules are active for source runs and frozen builds without a separate patch step.
-from runtime_hotfix import apply_runtime_hotfix
+# Integrated application fix: no user patch step is required.  Replace the
+# generic structural-easing helper with the guarded implementation before any
+# source/QML rewrite runs, then install the Bluetooth identity compatibility
+# layer before controller imports its lookup functions.
+import runtime_hotfix
+from runtime_easing_guard import patch_structural_easing
 
-_INTEGRATED_HOTFIX_STATUS = apply_runtime_hotfix()
+runtime_hotfix._patch_structural_easing = patch_structural_easing
+_INTEGRATED_HOTFIX_STATUS = runtime_hotfix.apply_runtime_hotfix()
 
 from PySide6.QtCore import QCoreApplication, Qt, QUrl
 from PySide6.QtGui import QFontDatabase, QGuiApplication, QIcon
