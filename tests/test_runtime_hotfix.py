@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 
 import runtime_easing_guard as guard
 import runtime_hotfix as hotfix
@@ -69,25 +68,30 @@ def test_recent_store_is_atomic_and_round_trips(tmp_path, monkeypatch):
 def test_qml_primary_becomes_right_middle_and_native_y_anchor_tracks_center(tmp_path):
     path = tmp_path / "WidgetWindow.qml"
     path.write_text(
-        '''Window {\n'
-        ' property real morphAnchorInset: 45\n'
-        ' function chooseMorphPlacement(anchorX, anchorY) {\n'
-        '   morphExpandLeft = false\n'
-        '   if (anchorY > 10) { morphExpandUp = true }\n'
-        ' }\n'
-        ' Rectangle { id: shell\n'
-        '   Item { id: toggleSlot; objectName: "widgetToggleSlot"; height: 30\n'
-        '     y: window.morphExpandUp\n'
-        '        ? parent.height - (window.morphAnchorInset - shell.y) - height / 2\n'
-        '        : (window.morphAnchorInset - shell.y) - height / 2\n'
-        '   }\n'
-        ' }\n'
-        ' function applyMorphGeometryFrame(force) {\n'
-        '   var offsetY = window.morphExpandUp\n'
-        '      ? frameHeight - window.morphAnchorInset * appController.widgetScale\n'
-        '      : window.morphAnchorInset * appController.widgetScale\n'
-        ' }\n'
-        '}\n'''.replace("'\n        '", ""),
+        """Window {
+    property real morphAnchorInset: 45
+    function chooseMorphPlacement(anchorX, anchorY) {
+        morphExpandLeft = false
+        if (anchorY > 10) { morphExpandUp = true }
+    }
+    Rectangle {
+        id: shell
+        Item {
+            id: toggleSlot
+            objectName: "widgetToggleSlot"
+            height: 30
+            y: window.morphExpandUp
+               ? parent.height - (window.morphAnchorInset - shell.y) - height / 2
+               : (window.morphAnchorInset - shell.y) - height / 2
+        }
+    }
+    function applyMorphGeometryFrame(force) {
+        var offsetY = window.morphExpandUp
+                    ? frameHeight - window.morphAnchorInset * appController.widgetScale
+                    : window.morphAnchorInset * appController.widgetScale
+    }
+}
+""",
         encoding="utf-8",
     )
     assert hotfix._patch_qml_widget(path)
@@ -147,8 +151,7 @@ def test_center_anchor_geometry_has_no_y_drift_and_monotonic_size():
         height = start_h + (end_h - start_h) * eased
         x = anchor_x - (width - right_inset)
         y = anchor_y - height / 2.0
-        center_y = y + height / 2.0
-        centers.append(center_y)
+        centers.append(y + height / 2.0)
         assert width <= prev_w + 1e-9
         assert height <= prev_h + 1e-9
         prev_w, prev_h = width, height
