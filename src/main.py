@@ -73,6 +73,13 @@ def _configure_qt_dll_search_path() -> None:
 _relaunch_with_project_venv()
 _configure_qt_dll_search_path()
 
+# This is part of the application itself. It runs before controller/QML import
+# so the same right-middle primary anchor and deterministic AirPods identity
+# rules are active for source runs and frozen builds without a separate patch step.
+from runtime_hotfix import apply_runtime_hotfix
+
+_INTEGRATED_HOTFIX_STATUS = apply_runtime_hotfix()
+
 from PySide6.QtCore import QCoreApplication, Qt, QUrl
 from PySide6.QtGui import QFontDatabase, QGuiApplication, QIcon
 from PySide6.QtQml import QQmlApplicationEngine
@@ -115,6 +122,7 @@ def load_application_fonts() -> None:
 
 def main() -> int:
     configure_logging()
+    logging.getLogger(__name__).info("Integrated hotfix status: %s", _INTEGRATED_HOTFIX_STATUS)
     QCoreApplication.setOrganizationName("AirPodsWidget")
     QCoreApplication.setApplicationName("AirPods Widget")
     QGuiApplication.setHighDpiScaleFactorRoundingPolicy(
