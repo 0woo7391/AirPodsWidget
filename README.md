@@ -1,5 +1,91 @@
 # AirPods Widget for Windows
 
+이 브랜치에는 **새 Glass Audio Widget 프로토타입**과 기존 AirPods 위젯 소스가 함께 있습니다.
+새 UI는 별도 런처로 실행합니다. 개발 중 버전이며, 완성된 배포용 EXE는 제공하지 않습니다.
+
+## 새 위젯 실행
+
+Windows 10 2004 이상 또는 Windows 11, Python 3.11 x64, GPU 기반 Qt Quick 렌더링이 필요합니다.
+BLE 배터리 수신에는 Bluetooth LE 지원 어댑터가 필요합니다.
+
+```powershell
+git clone --branch codex/glass-audio-widget https://github.com/0woo7391/AirPodsWidget.git
+Set-Location .\AirPodsWidget
+py -3.11 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements-runtime.txt
+.\prototypes\glass_audio_widget\run-glass-widget.bat
+```
+
+이미 저장소가 있다면 해당 브랜치에서 의존성을 설치하고 마지막 런처를 실행합니다.
+루트의 `run_windows.bat`은 기존 위젯용입니다. 새 위젯 실행에는 별도 MP3가 필요하지 않습니다.
+
+원격 화면에서 확인하려면 정적인 실제 바탕화면 캡처를 사용하는 런처를 실행합니다.
+
+```powershell
+.\prototypes\glass_audio_widget\run-remote-preview.bat
+```
+
+LIVE 모드는 캡처가 반복해서 겹치는 현상을 막기 위해 위젯 자체를 화면 캡처에서 제외합니다.
+따라서 원격 도구에서는 위젯이 보이지 않을 수 있습니다. 바탕화면 캡처는 메모리에서 처리합니다.
+
+## 새 위젯에 포함된 기능
+
+- 바탕화면 텍스처 기반 굴절과 로컬 블러, 가독성·블러 강도 설정
+- 접기·펼치기, 모듈 위치 변경, 마지막 창 위치 저장, 항상 위 표시
+- 실제 Windows 출력 음량·음소거 제어와 출력 장치 선택
+- 허용 앱·대상 세션을 선택하는 미디어 필터와 재생 제어
+- 등록 Bluetooth 장치 선택·저장, 수동 연결과 트레이 연결 메뉴
+- 사용자가 선택한 BLE 광고 소스의 L·R·CASE 배터리 표시
+- 시스템 트레이 메뉴, 별도 설정창과 모션 줄이기 설정
+
+설정에서 연결 대상과 배터리 소스를 선택해야 합니다. 임의 BLE 광고 주소만으로 등록 장치의
+신원을 인증할 수 없습니다. 시작 시 자동 Bluetooth 연결이나 자동 출력 전환은 수행하지 않습니다.
+미디어 표시는 Windows가 노출하는 세션과 해당 앱의 제어 지원 범위에 따릅니다.
+
+## 새 위젯 파일 구성
+
+| 경로 | 역할 |
+| --- | --- |
+| `prototypes/glass_audio_widget/` | 현재 UI, 설정, 장치 관리, 셰이더·런처·검증 코드 |
+| `prototypes/audio_widget_concepts/` | 재사용한 창 호스트·오디오·미디어·트레이·폰트·아이콘 |
+| `prototypes/desktop_glass_lab/` | 실제 바탕화면 캡처 도우미와 검증용 배경 |
+| `src/services/` | 공유 Windows 오디오·Bluetooth·BLE·미디어 서비스 |
+
+폴더 간 상대 경로를 유지해야 합니다. 이전 시안 화면과 실험용 이미지, 로컬 설계 MD,
+개인 설정, 캡처·로그·빌드 산출물은 이번 업로드에서 제외했습니다.
+실행 상세는 [RUNNING.txt](prototypes/glass_audio_widget/RUNNING.txt),
+광학 표현 관련 고지는 [THIRD_PARTY.txt](prototypes/glass_audio_widget/THIRD_PARTY.txt)를 확인하세요.
+폰트·아이콘 라이선스는 공유 `assets` 폴더의 라이선스 TXT에 포함되어 있습니다.
+
+## 새 위젯 검증 상태
+
+2026-10-29, 업로드 대상으로 선별한 소스를 별도 폴더로 내보내 기존 로컬 Python 환경에서 검사했습니다.
+새 환경에서 의존성을 처음 설치하는 검증과는 구분됩니다.
+
+- 저장소 테스트 **42개 통과**
+- 가짜 장치·임시 설정을 사용하는 장치 검사 **18개 통과**
+- UI 검사: `actual local blur changes background pixels` 단언 실패.
+  원본 작업 폴더에서도 동일하게 실패했으며 원인은 미해결입니다. 이후 UI 검사는 실행되지 않았습니다.
+- 실제 Bluetooth 재연결·BLE 배터리 매칭, 장시간 모션 품질, 새 위젯 EXE 배포는 검증 완료로 주장하지 않습니다.
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+$env:PYTHONPATH = (Join-Path (Get-Location) "src")
+.\.venv\Scripts\python.exe -B -m pytest tests -q
+.\.venv\Scripts\python.exe -B prototypes/glass_audio_widget/check_devices.py
+.\.venv\Scripts\python.exe -B prototypes/glass_audio_widget/check_widget.py
+```
+
+마지막 UI 검사는 테스트 창을 띄우고 자체 배경을 캡처하며 무시되는 검증 파일을 생성합니다.
+
+---
+
+## 기존 위젯 안내
+
+**아래는 기존 위젯의 기능·실행·빌드 문서입니다. 새 Glass Audio Widget의 기능이나 빌드 완료를
+의미하지 않습니다. 기존 빌드 스크립트는 새 프로토타입의 EXE 패키징을 제공하지 않습니다.**
+
+
 AirPods Pro 3 상태와 Windows 미디어를 한 화면에서 확인·제어하는 데스크톱 위젯입니다.
 별도 Bluetooth 커널 드라이버, Windows Test Mode, Secure Boot 변경, 무음 오디오 반복 재생을
 사용하지 않습니다.
