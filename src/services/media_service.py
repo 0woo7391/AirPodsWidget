@@ -214,7 +214,7 @@ class MediaService(QObject):
         return await session.try_toggle_play_pause_async()
 
     @staticmethod
-    async def _read_state(session: Any, playback_status_type: Any) -> MediaState:
+    async def _read_state(session: Any, playback_status_type: Any, properties: Any = None) -> MediaState:
         if session is None:
             return MediaState()
         try:
@@ -226,7 +226,8 @@ class MediaService(QObject):
             if not (is_playing or is_paused):
                 return MediaState()
 
-            properties = await session.try_get_media_properties_async()
+            if properties is None:
+                properties = await session.try_get_media_properties_async()
             if properties is None:
                 return MediaState()
             controls = playback.controls

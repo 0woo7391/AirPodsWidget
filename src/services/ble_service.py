@@ -12,6 +12,7 @@ from services.state_manager import AirPodsStateManager
 
 
 class BleService(QObject):
+    advertisementReceived = Signal(object)
     stateReceived = Signal(object)
     deviceLost = Signal()
     errorOccurred = Signal(str)
@@ -61,6 +62,7 @@ class BleService(QObject):
             )
             if parsed is None:
                 return
+            self.advertisementReceived.emit(parsed)
             state = self._manager.update(parsed)
             if state is not None:
                 self._reported_lost = False

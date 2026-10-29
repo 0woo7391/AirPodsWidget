@@ -86,12 +86,12 @@ if os.name == "nt":
         ]
 
 
-def find_airpods_status() -> Optional[BluetoothDeviceStatus]:
-    """Return the remembered AirPods device and its current connection state."""
+def paired_devices() -> list[BluetoothDeviceStatus]:
+    """Enumerate remembered devices without relying on their user-editable names."""
     if os.name != "nt":
-        return None
+        return []
 
-    library = ctypes.WinDLL("bthprops.cpl")
+    library = ctypes.WinDLL("bthprops.cpl", use_last_error=True)
     first = library.BluetoothFindFirstDevice
     next_device = library.BluetoothFindNextDevice
     close = library.BluetoothFindDeviceClose
@@ -114,26 +114,39 @@ def find_airpods_status() -> Optional[BluetoothDeviceStatus]:
 
     info = BLUETOOTH_DEVICE_INFO()
     info.dwSize = ctypes.sizeof(info)
+    ctypes.set_last_error(0)
     handle = first(ctypes.byref(params), ctypes.byref(info))
     if not handle:
-        return None
+        error = ctypes.get_last_error()
+        if error not in (0, 259):
+            raise ctypes.WinError(error)
+        return []
+    result = []
     try:
         while True:
             paired = bool(info.fAuthenticated) or bool(info.fRemembered)
-            if paired and "airpods" in info.szName.casefold():
-                return BluetoothDeviceStatus(
+            if paired:
+                result.append(BluetoothDeviceStatus(
                     info.szName,
                     info.Address.ullLong,
                     paired=True,
                     connected=bool(info.fConnected),
-                )
+                ))
             info = BLUETOOTH_DEVICE_INFO()
             info.dwSize = ctypes.sizeof(info)
             if not next_device(handle, ctypes.byref(info)):
                 break
     finally:
         close(handle)
-    return None
+    return result
+
+
+def find_airpods_status() -> Optional[BluetoothDeviceStatus]:
+    """Legacy name-based helper; new callers should persist a selected address."""
+    try:
+        return next((device for device in paired_devices() if "airpods" in device.name.casefold()), None)
+    except OSError:
+        return None
 
 
 def find_connected_airpods() -> Optional[BluetoothDeviceStatus]:

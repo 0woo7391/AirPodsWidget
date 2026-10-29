@@ -1,0 +1,252 @@
+{
+  "source": "https://lucianlabs.dev/icons/modules/",
+  "version": "2.0.13",
+  "commit": "db039f677ea56905f3cbc320aec7fca5774e79a9",
+  "adaptation": "Selected SVG geometry and final static poses only. No web runtime, hover effects, or animation loops.",
+  "icons": {
+    "play": {
+      "id": "play",
+      "version": "2.0.13",
+      "svg": "<path data-part=\"tri\" class=\"s\" d=\"M7 4.9v14.2a1 1 0 0 0 1.5.86l11.6-7.1a1 1 0 0 0 0-1.72L8.5 4.04A1 1 0 0 0 7 4.9z\"/><g data-part=\"bars\"><rect class=\"s\" x=\"6\" y=\"4.5\" width=\"4\" height=\"15\" rx=\"1.5\"/><rect class=\"s\" x=\"14\" y=\"4.5\" width=\"4\" height=\"15\" rx=\"1.5\"/></g>",
+      "poses": {
+        "*": {
+          "bars": {
+            "opacity": 0,
+            "scale": 0.4,
+            "rotate": -90
+          }
+        },
+        "playing": {
+          "tri": {
+            "opacity": 0,
+            "scale": 0.4,
+            "rotate": 90
+          },
+          "bars": {
+            "opacity": 1,
+            "scale": 1,
+            "rotate": 0
+          }
+        }
+      },
+      "origins": {
+        "tri": [
+          12,
+          12
+        ],
+        "bars": [
+          12,
+          12
+        ]
+      },
+      "defaultState": "paused"
+    },
+    "next": {
+      "id": "next",
+      "version": "2.0.13",
+      "svg": "<path data-part=\"tri\" class=\"s\" d=\"M5 5.4v13.2a.9.9 0 0 0 1.4.75l9.6-6.6a.9.9 0 0 0 0-1.5L6.4 4.65A.9.9 0 0 0 5 5.4z\"/><path data-part=\"bar\" class=\"a\" d=\"M19.5 5v14\"/>",
+      "poses": null,
+      "origins": {
+        "tri": [
+          16.25,
+          12
+        ],
+        "bar": [
+          19.5,
+          12
+        ]
+      },
+      "defaultState": null
+    },
+    "speaker": {
+      "id": "speaker",
+      "version": "2.0.13",
+      "svg": "<path data-part=\"cone\" class=\"s\" d=\"M4 9.5h3l4.5-4v13L7 14.5H4a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1z\"/><path data-part=\"w1\" class=\"a\" d=\"M15 9.5a3.5 3.5 0 0 1 0 5\"/><path data-part=\"w2\" class=\"a\" d=\"M17.75 6.75a7.4 7.4 0 0 1 0 10.5\"/><path data-part=\"x\" class=\"a\" d=\"m15.5 9.5 5 5m0-5-5 5\"/>",
+      "poses": {
+        "*": {
+          "x": {
+            "opacity": 0,
+            "scale": 0.4
+          }
+        },
+        "muted": {
+          "w1": {
+            "opacity": 0,
+            "scale": 0.6
+          },
+          "w2": {
+            "opacity": 0,
+            "scale": 0.6
+          },
+          "x": {
+            "opacity": 1,
+            "scale": 1
+          }
+        }
+      },
+      "origins": {
+        "cone": [
+          7,
+          12
+        ],
+        "x": [
+          18,
+          12
+        ],
+        "w1": [
+          11.5,
+          12
+        ],
+        "w2": [
+          11.5,
+          12
+        ]
+      },
+      "defaultState": "on"
+    },
+    "microphone": {
+      "id": "microphone",
+      "version": "2.0.13",
+      "svg": "<rect class=\"s\" x=\"9\" y=\"3\" width=\"6\" height=\"11\" rx=\"3\"/><path data-part=\"level\" class=\"a\" d=\"M12 7v3.5\"/><path d=\"M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21\"/><path data-part=\"slash\" class=\"a\" d=\"M4 4l16 16\"/>",
+      "poses": {
+        "*": {
+          "slash": {
+            "draw": 0,
+            "opacity": 0
+          }
+        },
+        "muted": {
+          "slash": {
+            "draw": 1,
+            "opacity": 1
+          },
+          "level": {
+            "opacity": 0
+          }
+        }
+      },
+      "origins": {
+        "level": [
+          12,
+          10.5
+        ]
+      },
+      "defaultState": "on"
+    },
+    "headphones": {
+      "id": "headphones",
+      "version": "2.0.13",
+      "svg": "<path data-part=\"band\" d=\"M4 15v-3a8 8 0 0 1 16 0v3\"/><rect class=\"f\" x=\"3\" y=\"14\" width=\"4.5\" height=\"7\" rx=\"1.5\"/><rect x=\"3\" y=\"14\" width=\"4.5\" height=\"7\" rx=\"1.5\"/><rect class=\"f\" x=\"16.5\" y=\"14\" width=\"4.5\" height=\"7\" rx=\"1.5\"/><rect x=\"16.5\" y=\"14\" width=\"4.5\" height=\"7\" rx=\"1.5\"/>",
+      "poses": null,
+      "origins": {
+        "*": [
+          12,
+          21
+        ],
+        "band": [
+          12,
+          15
+        ]
+      },
+      "defaultState": null
+    },
+    "sliders": {
+      "id": "sliders",
+      "version": "2.0.13",
+      "svg": "<path d=\"M3.5 6.5h17M3.5 12h17M3.5 17.5h17\"/><g data-part=\"k1\"><circle class=\"f\" cx=\"8\" cy=\"6.5\" r=\"2.25\"/><circle cx=\"8\" cy=\"6.5\" r=\"2.25\"/></g><g data-part=\"k2\"><circle class=\"f\" cx=\"16\" cy=\"12\" r=\"2.25\"/><circle cx=\"16\" cy=\"12\" r=\"2.25\"/></g><g data-part=\"k3\"><circle class=\"f\" cx=\"10\" cy=\"17.5\" r=\"2.25\"/><circle cx=\"10\" cy=\"17.5\" r=\"2.25\"/></g>",
+      "poses": null,
+      "origins": null,
+      "defaultState": null
+    },
+    "grid": {
+      "id": "grid",
+      "version": "2.0.13",
+      "svg": "<rect data-part=\"t1\" class=\"s\" x=\"3.5\" y=\"3.5\" width=\"7\" height=\"7\" rx=\"1.75\"/><rect data-part=\"t2\" class=\"f\" x=\"13.5\" y=\"3.5\" width=\"7\" height=\"7\" rx=\"1.75\"/><rect data-part=\"t2o\" x=\"13.5\" y=\"3.5\" width=\"7\" height=\"7\" rx=\"1.75\"/><rect data-part=\"t3\" class=\"s\" x=\"3.5\" y=\"13.5\" width=\"7\" height=\"7\" rx=\"1.75\"/><rect data-part=\"t4\" class=\"s\" x=\"13.5\" y=\"13.5\" width=\"7\" height=\"7\" rx=\"1.75\"/>",
+      "poses": null,
+      "origins": {
+        "t1": [
+          7,
+          7
+        ],
+        "t2": [
+          17,
+          7
+        ],
+        "t2o": [
+          17,
+          7
+        ],
+        "t3": [
+          7,
+          17
+        ],
+        "t4": [
+          17,
+          17
+        ]
+      },
+      "defaultState": null
+    },
+    "chevron": {
+      "id": "chevron",
+      "version": "2.0.13",
+      "svg": "<path data-part=\"mark\" class=\"a\" d=\"m6 9 6 6 6-6\"/>",
+      "poses": {
+        "expanded": {
+          "mark": {
+            "rotate": 180
+          }
+        }
+      },
+      "origins": null,
+      "defaultState": "collapsed"
+    },
+    "battery": {
+      "id": "battery",
+      "version": "2.0.13",
+      "svg": "<rect class=\"s\" x=\"2.5\" y=\"7\" width=\"17\" height=\"10\" rx=\"2.25\"/><path d=\"M21.5 10.5v3\"/><rect data-part=\"fill\" class=\"f\" x=\"5\" y=\"9.5\" width=\"12\" height=\"5\" rx=\"1\"/><path data-part=\"bolt\" d=\"M11.5 8.25 9.25 12.25h3.5l-2.25 4\"/>",
+      "poses": {
+        "*": {
+          "bolt": {
+            "opacity": 0,
+            "scale": 0.4
+          }
+        },
+        "charging": {
+          "bolt": {
+            "opacity": 1,
+            "scale": 1
+          },
+          "fill": {
+            "opacity": 0.45
+          }
+        }
+      },
+      "origins": {
+        "fill": [
+          5,
+          12
+        ],
+        "bolt": [
+          11,
+          12.25
+        ]
+      },
+      "defaultState": "level"
+    },
+    "music": {
+      "id": "music",
+      "version": "2.0.13",
+      "svg": "<path d=\"M9 18V5.5l11-2v12\"/><path class=\"a\" d=\"m9 9 11-2\"/><circle data-part=\"h1\" class=\"s\" cx=\"6.5\" cy=\"18\" r=\"2.5\"/><circle data-part=\"h2\" class=\"s\" cx=\"17.5\" cy=\"15.5\" r=\"2.5\"/>",
+      "poses": null,
+      "origins": {
+        "*": [
+          12,
+          20
+        ]
+      },
+      "defaultState": "idle"
+    }
+  }
+}
+

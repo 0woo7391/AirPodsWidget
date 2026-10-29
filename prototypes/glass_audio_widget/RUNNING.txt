@@ -1,0 +1,43 @@
+Glass Audio Widget prototype (Windows)
+
+This is a separate prototype. The root application's existing entrypoint still
+starts the legacy widget. Use this prototype's launcher for the new interface.
+
+Requirements: Windows 10 version 2004 or newer, GPU-backed Qt Quick rendering,
+and Python 3.11. From the repository root in PowerShell:
+
+  py -3.11 -m venv .venv
+  .\.venv\Scripts\python.exe -m pip install -r requirements-runtime.txt
+  .\prototypes\glass_audio_widget\run-glass-widget.bat
+
+For a remotely visible desktop snapshot, use run-remote-preview.bat.
+Live mode excludes the widget from desktop capture to avoid recursive feedback;
+remote capture tools may therefore omit it. Desktop images stay in memory.
+
+The audio_widget_concepts directory contains shared host, icon, audio, media,
+and tray dependencies. Its earlier visual prototypes are not included here.
+desktop_glass_lab contains the desktop capture helper and a test fixture.
+Keep these relative paths intact. Compiled .qsb shaders are included alongside
+their GLSL sources. Rebuild shaders using the matching Qt 6.11 qsb tool.
+
+Use settings to choose remembered Bluetooth devices, opt into battery scanning,
+select battery sources, and filter media sessions. A random BLE advertisement
+cannot authenticate a remembered Bluetooth device. No automatic startup
+connection or output switch is performed.
+
+Checks (from repository root, using the existing environment):
+  .\.venv\Scripts\python.exe -B prototypes/glass_audio_widget/check_devices.py
+  .\.venv\Scripts\python.exe -B prototypes/glass_audio_widget/check_widget.py
+
+The UI check briefly opens test windows, captures its fixture, uses fake audio
+and Bluetooth services, and writes ignored artifacts. Hardware Bluetooth/audio
+acceptance, subjective motion quality, and standalone EXE packaging remain
+separate validation steps. This prototype is not a packaged release.
+
+Publication check, 2026-10-29: an export of the selected Git index passed all
+42 repository tests and 18 device checks using the existing local environment.
+The UI check failed at "actual local blur changes background pixels" on both
+the selected export and the original working tree. Its cause is unresolved;
+later UI assertions did not run. Do not treat this snapshot as UI-validated.
+
+Licenses: see THIRD_PARTY.txt and ../audio_widget_concepts/assets/*-LICENSE.txt.

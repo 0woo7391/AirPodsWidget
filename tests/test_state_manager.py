@@ -107,3 +107,48 @@ def test_rssi_only_change_does_not_emit_visible_state_update():
     assert manager.update(second) is None
     assert manager.current is not None
     assert manager.current.rssi == -52
+
+
+def test_peer_flags_cannot_toggle_fresh_owner_state():
+    manager = AirPodsStateManager()
+    now = time.monotonic()
+    for i in range(12):
+        left = i % 2 == 0
+        adv = parse_airpods_manufacturer_data(
+            packet(left_broadcast=left, left_in_ear=left, right_in_ear=True,
+                   case_charging=not left),
+            address="L" if left else "R", rssi=-45, timestamp=now + i * 0.1)
+        manager.update(adv)
+        assert manager.current.left.in_ear is True
+        assert manager.current.case.battery.charging is False
+
+
+def test_owner_flag_change_needs_two_distinct_advertisements():
+    manager = AirPodsStateManager()
+    now = time.monotonic()
+    def report(offset, charging):
+        return parse_airpods_manufacturer_data(
+            packet(left_charging=charging), address="L", rssi=-45, timestamp=now + offset)
+    manager.update(report(0, False))
+    changed = report(0.1, True)
+    manager.update(changed)
+    assert not manager.current.left.battery.charging
+    manager.update(changed)  # Re-reading one sample cannot confirm a transition.
+    assert not manager.current.left.battery.charging
+    manager.update(report(0.2, True))
+    assert manager.current.left.battery.charging
+    assert not manager.current.left.in_ear
+    manager.update(report(0.3, False))
+    assert manager.current.left.battery.charging
+    manager.update(report(0.4, True))  # Isolated reversal is discarded.
+    assert manager.current.left.battery.charging
+
+
+def test_reset_does_not_carry_pending_flags_to_next_device():
+    manager = AirPodsStateManager()
+    now = time.monotonic()
+    for offset, charging in ((0, False), (0.1, True)):
+        manager.update(parse_airpods_manufacturer_data(packet(left_charging=charging),
+            address="L", rssi=-45, timestamp=now + offset))
+    manager.reset()
+    assert manager._pending_flags == {}

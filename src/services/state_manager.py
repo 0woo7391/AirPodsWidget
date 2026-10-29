@@ -29,7 +29,9 @@ class AirPodsStateManager:
         self._by_side: dict[Side, ParsedAdvertisement] = {}
         self._current: Optional[AirPodsState] = None
         self._last_seen = 0.0
+        self.last_update_accepted = False
         self._pending_expiry_state: Optional[AirPodsState] = None
+        self._pending_flags: dict[str, tuple[tuple[bool, ...], Side, float]] = {}
 
     @property
     def current(self) -> Optional[AirPodsState]:
@@ -37,10 +39,12 @@ class AirPodsStateManager:
         return deepcopy(self._current)
 
     def reset(self) -> None:
+        self.last_update_accepted = False
         self._by_side.clear()
         self._current = None
         self._last_seen = 0.0
         self._pending_expiry_state = None
+        self._pending_flags.clear()
 
     def expire_if_needed(self, now: Optional[float] = None) -> bool:
         now = time.monotonic() if now is None else now
@@ -55,6 +59,7 @@ class AirPodsStateManager:
         for side in stale:
             self._by_side.pop(side, None)
         if stale:
+            self._pending_flags.clear()
             if self._by_side:
                 # Keep the device detected when one broadcaster temporarily
                 # goes quiet, but stop exposing stale in-ear information.
@@ -78,16 +83,22 @@ class AirPodsStateManager:
         return deepcopy(state)
 
     def update(self, adv: ParsedAdvertisement) -> Optional[AirPodsState]:
+        self.last_update_accepted = False
         if adv.rssi < self.rssi_min:
             return None
         if not self._is_plausible(adv):
             return None
+        previous = self._by_side.get(adv.side)
+        if previous and adv.timestamp <= previous.timestamp:
+            return None
 
+        # An accepted unchanged packet can return None too; freshness needs both facts.
+        self.last_update_accepted = True
         # A fresh advertisement supersedes a pending partial-expiry update.
         self._pending_expiry_state = None
         self._by_side[adv.side] = adv
         self._last_seen = max(self._last_seen, adv.timestamp)
-        merged = self._merge()
+        merged = self._merge(adv)
         if self._current is not None:
             visible_candidate = replace(merged, rssi=self._current.rssi)
             if visible_candidate == self._current:
@@ -118,7 +129,7 @@ class AirPodsStateManager:
             return False
         return True
 
-    def _merge(self) -> AirPodsState:
+    def _merge(self, incoming: Optional[ParsedAdvertisement] = None) -> AirPodsState:
         advertisements = list(self._by_side.values())
         if not advertisements:
             raise RuntimeError("Cannot merge without advertisements")
@@ -129,22 +140,39 @@ class AirPodsStateManager:
         result.right = replace(newest.state.right)
         result.case = replace(newest.state.case)
 
-        left_source = max(
-            [a for a in advertisements if a.state.left.battery.percent is not None] or advertisements,
-            key=lambda a: a.timestamp,
-        ).state.left
-        right_source = max(
-            [a for a in advertisements if a.state.right.battery.percent is not None] or advertisements,
-            key=lambda a: a.timestamp,
-        ).state.right
-        case_source = max(
-            [a for a in advertisements if a.state.case.battery.percent is not None] or advertisements,
-            key=lambda a: a.timestamp,
-        ).state.case
-
-        result.left = replace(left_source, battery=replace(left_source.battery))
-        result.right = replace(right_source, battery=replace(right_source.battery))
-        result.case = replace(case_source, battery=replace(case_source.battery))
+        fresh = [a for a in advertisements if newest.timestamp - a.timestamp <= self.side_lost_timeout]
+        for name, preferred in (("left", Side.LEFT), ("right", Side.RIGHT), ("case", Side.LEFT)):
+            # Prefer a pod's own report; keep one case source while it is fresh.
+            source = next((a for a in fresh if a.side == preferred), newest)
+            pod = deepcopy(getattr(source.state, name))
+            if pod.battery.percent is None:
+                valid = [a for a in fresh if getattr(a.state, name).battery.percent is not None]
+                if valid:
+                    pod.battery.percent = getattr(max(valid, key=lambda a: a.timestamp).state, name).battery.percent
+                elif self._current:
+                    pod.battery.percent = getattr(self._current, name).battery.percent
+            flags = (pod.battery.charging,) if name == "case" else (pod.battery.charging, pod.in_ear)
+            if incoming is not None and self._current is not None:
+                old = getattr(self._current, name)
+                old_flags = (old.battery.charging,) if name == "case" else (old.battery.charging, old.in_ear)
+                if flags == old_flags:
+                    self._pending_flags.pop(name, None)
+                else:
+                    pending = self._pending_flags.get(name)
+                    confirmed = (source is incoming and pending is not None
+                                 and pending[:2] == (flags, source.side)
+                                 and 0 < source.timestamp - pending[2] <= self.side_lost_timeout)
+                    if confirmed:
+                        self._pending_flags.pop(name, None)
+                    else:
+                        if source is incoming:
+                            self._pending_flags[name] = (flags, source.side, source.timestamp)
+                        pod.battery.charging = old.battery.charging
+                        if name != "case":
+                            if pod.in_ear != old.in_ear:
+                                result.in_ear_fresh = False
+                            pod.in_ear = old.in_ear
+            setattr(result, name, pod)
         result.rssi = max(a.rssi for a in advertisements)
         result.detected = True
         return result

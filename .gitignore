@@ -14,6 +14,21 @@ AirPodsWidget.msix
 
 # Generated previews and UI captures
 *.png
+design-plans/
+design-previews/
+artifacts/
+node_modules/
+.publish-check/
+*.mp4
+*.webm
+*.ini
+# Design notes stay local; existing tracked documentation is unaffected.
+*.md
+
+# Standalone experiments are not part of the published widget.
+prototypes/chromium_liquid_glass_widget/
+prototypes/jelly_button_lab/
+prototypes/glass_audio_widget/jelly.frag*
 
 # Temporary signing material and logs
 *.log

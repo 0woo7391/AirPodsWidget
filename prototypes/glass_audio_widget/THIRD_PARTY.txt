@@ -1,0 +1,34 @@
+References and assets
+
+Hyalite v0.5.0: https://github.com/VII-Cae/hyalite--liquid-glass
+The optical approach references rounded-shape distance fields, bevel normals,
+Snell-law source displacement and rim lighting. The Qt GLSL implementation is
+not Hyalite's JavaScript/SVG runtime or Apple's renderer.
+
+Qt ShaderEffect: https://doc.qt.io/qt-6/qml-qtquick-shadereffect.html
+Selected Lucian SVG poses and SUIT font live in ../audio_widget_concepts/assets.
+Their full licenses are LUCIAN-LICENSE.txt and SUIT-LICENSE.txt in that folder.
+
+Hyalite license retained for the referenced/adapted optical approach:
+
+MIT License
+
+Copyright (c) 2026 VII-Cae (VII)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

@@ -330,22 +330,28 @@ def _activate_endpoint_volume(device: ctypes.c_void_p) -> ctypes.c_void_p:
     return endpoint
 
 
-def _default_endpoint_volume() -> ctypes.c_void_p:
+def _default_endpoint_volume(device_id: str = "") -> ctypes.c_void_p:
     enumerator = _co_create(CLSID_MM_DEVICE_ENUMERATOR, IID_MM_DEVICE_ENUMERATOR)
     device = ctypes.c_void_p()
     try:
-        _check_hresult(
-            _vtable_call(
-                enumerator,
-                4,
-                HRESULT,
-                [wintypes.DWORD, wintypes.DWORD, ctypes.POINTER(ctypes.c_void_p)],
-                E_DATA_FLOW_RENDER,
-                E_ROLE_MULTIMEDIA,
-                ctypes.byref(device),
-            ),
-            "GetDefaultAudioEndpoint",
-        )
+        if device_id:
+            _check_hresult(_vtable_call(
+                enumerator, 5, HRESULT,
+                [wintypes.LPCWSTR, ctypes.POINTER(ctypes.c_void_p)],
+                device_id, ctypes.byref(device)), "GetDevice")
+        else:
+            _check_hresult(
+                _vtable_call(
+                    enumerator,
+                    4,
+                    HRESULT,
+                    [wintypes.DWORD, wintypes.DWORD, ctypes.POINTER(ctypes.c_void_p)],
+                    E_DATA_FLOW_RENDER,
+                    E_ROLE_MULTIMEDIA,
+                    ctypes.byref(device),
+                ),
+                "GetDefaultAudioEndpoint",
+            )
         return _activate_endpoint_volume(device)
     finally:
         if device:
@@ -353,8 +359,8 @@ def _default_endpoint_volume() -> ctypes.c_void_p:
         _release(enumerator)
 
 
-def _get_default_volume() -> int:
-    endpoint = _default_endpoint_volume()
+def _get_default_volume(device_id: str = "") -> int:
+    endpoint = _default_endpoint_volume(device_id)
     try:
         value = ctypes.c_float()
         _check_hresult(
@@ -372,8 +378,8 @@ def _get_default_volume() -> int:
         _release(endpoint)
 
 
-def _set_default_volume(percent: int) -> None:
-    endpoint = _default_endpoint_volume()
+def _set_default_volume(percent: int, device_id: str = "") -> None:
+    endpoint = _default_endpoint_volume(device_id)
     try:
         _check_hresult(
             _vtable_call(
@@ -390,12 +396,34 @@ def _set_default_volume(percent: int) -> None:
         _release(endpoint)
 
 
-def current_volume() -> int:
-    return _with_com(_get_default_volume)
+def current_volume(*, device_id: str = "") -> int:
+    return _with_com(lambda: _get_default_volume(device_id))
 
 
-def set_volume(percent: int) -> None:
-    _with_com(lambda: _set_default_volume(max(0, min(100, int(percent)))))
+def _endpoint_mute(value: bool | None = None, device_id: str = "") -> bool:
+    endpoint = _default_endpoint_volume(device_id)
+    try:
+        if value is not None:
+            _check_hresult(_vtable_call(endpoint, 14, HRESULT,
+                [ctypes.c_int, ctypes.c_void_p], int(value), None), "SetMute")
+        muted = ctypes.c_int()
+        _check_hresult(_vtable_call(endpoint, 15, HRESULT,
+            [ctypes.POINTER(ctypes.c_int)], ctypes.byref(muted)), "GetMute")
+        return bool(muted.value)
+    finally:
+        _release(endpoint)
+
+
+def current_mute(*, device_id: str = "") -> bool:
+    return _with_com(lambda: _endpoint_mute(device_id=device_id))
+
+
+def set_mute(value: bool, *, device_id: str = "") -> None:
+    _with_com(lambda: _endpoint_mute(value, device_id))
+
+
+def set_volume(percent: int, *, device_id: str = "") -> None:
+    _with_com(lambda: _set_default_volume(max(0, min(100, int(percent))), device_id))
 
 
 def find_airpods(outputs: Iterable[AudioOutput]) -> AudioOutput | None:
