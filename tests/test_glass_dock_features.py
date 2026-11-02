@@ -151,11 +151,47 @@ def test_in_ear_holds_through_the_gap_between_advertisements(tmp_path):
 
 def test_module_order_and_visibility(tmp_path):
     prefs = DockPrefs(QSettings(str(tmp_path / "dock.ini"), QSettings.IniFormat))
-    assert [m["id"] for m in prefs.modules] == ["airpods", "media", "volume", "output", "launcher"]
+    assert [m["id"] for m in prefs.modules] == ["airpods", "media", "volume", "output", "launcher", "instagram"]
     prefs.moveModule("launcher", -10)
     prefs.setModuleVisible("media", False)
     assert [(m["id"], m["visible"]) for m in prefs.modules][:3] == [("launcher", True), ("airpods", True),
                                                                      ("media", False)]
-    for module in ["airpods", "launcher", "volume", "output"]:
+    for module in ["airpods", "launcher", "volume", "output", "instagram"]:
         prefs.setModuleVisible(module, False)
     assert any(m["visible"] for m in prefs.modules)  # the last visible module cannot be hidden
+
+
+def test_instagram_toasts_are_recognised_and_others_ignored():
+    from notifications import instagram_message
+    assert instagram_message("Google Chrome Chrome", ["mika", "오늘 저녁 어때?", "instagram.com"]) == ("mika", "오늘 저녁 어때?")
+    assert instagram_message("Google Chrome Chrome", ["Instagram", "mika: 안녕", "instagram.com"]) == ("mika", "안녕")
+    assert instagram_message("Instagram Facebook.InstagramBeta", ["mika", "사진을 보냈습니다"]) == ("mika", "사진을 보냈습니다")
+    assert instagram_message("Google Chrome Chrome", ["YouTube", "새 동영상", "youtube.com"]) is None
+    assert instagram_message("Discord", ["mika", "instagram 링크 봤어?"]) is None   # not a browser or the app
+
+
+def test_instagram_dm_hides_content_unless_allowed(tmp_path, monkeypatch):
+    dock, _devices, _media, notices = make(tmp_path, monkeypatch)
+    titles = []
+    dock.notice.connect(lambda title, *_: titles.append(title))
+    dock.on_instagram("mika", "비밀 내용")
+    assert notices[-1] == ("Instagram 새 메시지", "message") and titles[-1] == "mika"
+    dock.set("island/instagramContent", True)
+    dock.on_instagram("mika", "비밀 내용")
+    assert notices[-1] == ("비밀 내용", "message")
+    dock.set("island/instagram", False)
+    dock.on_instagram("mika", "x")
+    assert len(notices) == 2
+
+
+def test_watcher_keeps_recent_dms_and_unread_count():
+    from notifications import MAX_RECENT, NotificationWatcher
+    watcher = NotificationWatcher()
+    seen = []
+    watcher.message.connect(lambda sender, content: seen.append(sender))
+    for i in range(MAX_RECENT + 3):
+        watcher.add(f"user{i}", "hi")
+    assert len(watcher.messages) == MAX_RECENT and watcher.messages[0]["sender"] == f"user{MAX_RECENT + 2}"
+    assert watcher.unread == MAX_RECENT + 3 and len(seen) == MAX_RECENT + 3
+    watcher.markRead()
+    assert watcher.unread == 0 and len(watcher.messages) == MAX_RECENT

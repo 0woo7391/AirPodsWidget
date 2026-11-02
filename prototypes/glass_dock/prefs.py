@@ -10,9 +10,9 @@ import json
 from PySide6.QtCore import Property, QObject, QSettings, Signal, Slot
 from PySide6.QtGui import QGuiApplication
 
-MODULES = ["airpods", "media", "volume", "output", "launcher"]
+MODULES = ["airpods", "media", "volume", "output", "launcher", "instagram"]
 MODULE_NAMES = {"airpods": "AirPods", "media": "미디어", "volume": "볼륨", "output": "출력 장치",
-                "launcher": "빠른 실행"}
+                "launcher": "빠른 실행", "instagram": "Instagram"}
 
 DEFAULTS = {
     # Dock: "auto" screen is the outermost one on the chosen edge, so the dock never
@@ -25,6 +25,8 @@ DEFAULTS = {
     "island/screens": "primary", "island/align": "center", "island/offset": 0, "island/scale": 1.0,
     "island/connect": True, "island/disconnect": True, "island/lowBattery": True,
     "island/suppressDuringGames": True,
+    # Instagram DMs read from Windows notifications; content off by default (sender only).
+    "island/instagram": True, "island/instagramContent": False,
     "battery/threshold": 20, "battery/sound": True, "battery/soundVolume": 60, "battery/soundDuringGames": True,
     "media/autoPause": True, "media/autoResume": False, "media/followAny": True,
     "system/startWithWindows": False,

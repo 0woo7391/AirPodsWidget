@@ -21,7 +21,7 @@ Item {
 
     property string title: ""
     property string subtitle: ""
-    property string tone: "connected"   // connected | disconnected | low
+    property string tone: "connected"   // connected | disconnected | low | message
     property var batteries: []          // [{label, value, charging}] for L, R, case
 
     // Seconds since the notification appeared; driven by the frame clock.
@@ -46,7 +46,8 @@ Item {
     readonly property real p: t < closeAt ? Theme.spring(13, 0.6, t) : 1 - Theme.spring(15, 0.62, t - closeAt)
     readonly property real contentOpacity: Theme.seg(t, 0.16, 0.36) * (1 - Theme.seg(t, closeAt, closeAt + 0.12))
     // The same status colours as the dock's dots.
-    readonly property color accent: tone === "low" ? Theme.warn : tone === "disconnected" ? Theme.inkTertiary : Theme.good
+    readonly property color accent: tone === "low" ? Theme.warn : tone === "disconnected" ? Theme.inkTertiary
+        : tone === "message" ? Theme.charge : Theme.good
 
     function levelColor(part) {
         return part.charging ? Theme.charge : part.value <= 10 ? Theme.bad : part.value <= 20 ? Theme.warn : Theme.good
@@ -124,14 +125,25 @@ Item {
                     border.width: 1; border.color: Theme.stroke
                     DockIcon {
                         anchors.centerIn: parent
+                        opacity: island.tone !== "message" ? 1 : 0
                         size: 30
                         name: "headphones"
                         color: island.tone === "disconnected" ? Theme.inkSecondary : Theme.ink
                     }
+                    // A message shows its sender's initial.
+                    Text {
+                        anchors.centerIn: parent
+                        opacity: island.tone === "message" ? 1 : 0
+                        text: (island.title || "?").charAt(0).toUpperCase()
+                        color: Theme.ink
+                        font.family: dockFont; font.pixelSize: 26; font.weight: Font.DemiBold
+                    }
                 }
                 // Status badge on the avatar: check when connected, ! when low.
                 Rectangle {
-                    visible: island.tone !== "disconnected"
+                    // Opacity, not visible: an item turning visible inside the hidden effect source
+                    // is not redrawn when the same island window is reused.
+                    opacity: island.tone === "connected" || island.tone === "low" ? 1 : 0
                     width: 22; height: 22; radius: 11
                     x: avatar.x + 44; y: avatar.y + 42
                     color: island.accent
@@ -174,7 +186,7 @@ Item {
                     x: parent.width - width - 24
                     anchors.verticalCenter: parent.verticalCenter
                     spacing: 10
-                    visible: island.batteries.length > 0
+                    opacity: island.batteries.length > 0 ? 1 : 0
                     Repeater {
                         model: island.batteries
                         Column {

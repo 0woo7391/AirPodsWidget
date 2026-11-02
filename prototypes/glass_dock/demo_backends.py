@@ -118,15 +118,18 @@ DEMO_APPS = [
 
 
 
-def demo_events(devices: DemoDevices) -> QTimer:
-    """Every 6 s an AirPods event, so the island shows: disconnect, connect, left bud low."""
+def demo_events(devices: DemoDevices, watcher=None) -> QTimer:
+    """Every 6 s an island event: disconnect, connect, left bud low, an Instagram DM."""
     timer = QTimer()
     step = 0
 
     def tick():
         nonlocal step
-        kind = step % 3
-        if kind == 0:
+        kind = step % 4
+        if kind == 3:
+            if watcher is not None:
+                watcher.add("mika", "오늘 저녁 어때?")
+        elif kind == 0:
             devices.data.update(connected=False, status="등록됨 · 미연결")
             devices.changed.emit()
         elif kind == 1:

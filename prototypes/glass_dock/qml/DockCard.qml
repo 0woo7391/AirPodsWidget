@@ -29,6 +29,7 @@ Item {
     property int railIndex: 0
     property real railHeight: Theme.railRow
     property Component railContent   // replaces the icon row (the launcher's app rail)
+    property Component railIconComponent   // in place of the Lucian icon (a glyph not in the set)
 
     readonly property real railness: dock ? dock.railness : 0
     readonly property real railOpen: dock ? dock.railOpen : 0
@@ -144,11 +145,17 @@ Item {
         Item {
             readonly property real iconCenter: card.mirrored ? Theme.railWidth / 2 : width - Theme.railWidth / 2
             DockIcon {
+                visible: !card.railIconComponent
                 x: parent.iconCenter - size / 2
                 anchors.verticalCenter: parent.verticalCenter
                 size: 18
                 name: card.railIcon
                 pose: card.railPose
+            }
+            Loader {
+                sourceComponent: card.railIconComponent
+                x: parent.iconCenter - width / 2
+                anchors.verticalCenter: parent.verticalCenter
             }
             Rectangle {
                 x: parent.iconCenter + 6; y: parent.height / 2 - 11
