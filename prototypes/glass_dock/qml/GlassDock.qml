@@ -78,6 +78,25 @@ Item {
         }
     }
     function openNow(id) { closeTimer.stop(); switchTimer.stop(); openCard = id }
+    // Safety net: when the pointer leaves through a part of the window that is masked out
+    // or covered, the hover handlers may never hear it go. While a card is open, check
+    // where the pointer really is and close once it has been outside the dock and the
+    // flyout for two checks in a row.
+    Timer {
+        id: leaveCheck
+        property int misses: 0
+        interval: 300; repeat: true
+        running: dock.openCard.length > 0 && dock.forcedCard.length === 0
+        onRunningChanged: misses = 0
+        onTriggered: {
+            const p = dockHost.cursorPos()
+            const inside = (r) => p.x >= r.x - 12 && p.x <= r.x + r.width + 12 && p.y >= r.y - 12 && p.y <= r.y + r.height + 12
+            const over = inside(Qt.rect(column.x, column.y - 30, column.width, column.height + 30))
+                || (flyout.visible && inside(Qt.rect(flyout.x, flyout.y, flyout.width, flyout.height)))
+            misses = over ? 0 : misses + 1
+            if (misses >= 2) { dock.openCard = ""; dock.pendingCard = ""; misses = 0 }
+        }
+    }
     Timer { id: openTimer; interval: Theme.hoverOpenDelay; onTriggered: if (dock.pendingCard.length) dock.openCard = dock.pendingCard }
     Timer {
         id: switchTimer; interval: 160
@@ -153,6 +172,38 @@ Item {
             }
             Rectangle { x: 40; y: 120; width: 220; height: 220; radius: 110; color: "#55F2C14E" }
             Rectangle { x: 410; y: 470; width: 180; height: 180; radius: 90; color: "#4433A1C9" }
+        }
+    }
+
+    // While the dock is dragged on the icon grid, the icon rows it will land on show as
+    // card-shaped outlines; they glide from row to row and the drop fills them.
+    Item {
+        id: ghost
+        readonly property bool active: grip.held && dock.gridOn && !dock.rail
+        z: 5   // over the moving cards, as outlines, so the target reads even where they overlap
+        x: column.x
+        y: active ? column.rowY(Math.max(column.minY, Math.min(column.maxY, column.wantY))) : column.y
+        Behavior on y { enabled: ghost.active; NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
+        width: column.width
+        height: column.layout.bentoHeight
+        opacity: active ? 1 : 0
+        visible: opacity > 0
+        Behavior on opacity { NumberAnimation { duration: 160 } }
+        Repeater {
+            model: dock.order
+            Rectangle {
+                required property string modelData
+                readonly property var slot: column.layout.bento[modelData]
+                readonly property Item card: dock.cardsById[modelData]
+                x: slot ? slot.x : 0
+                y: slot ? slot.y : 0
+                width: slot ? slot.w : 0
+                height: card ? card.bentoHeight : 0
+                radius: Theme.radius
+                color: "#0DFFFFFF"
+                border.width: 1.5
+                border.color: "#80FFFFFF"
+            }
         }
     }
 

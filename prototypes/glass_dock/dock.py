@@ -20,7 +20,7 @@ from pathlib import Path
 
 from PySide6.QtCore import (Property, QObject, QPoint, QRect, QSettings, QSize, QStandardPaths, QTimer, QUrl, Qt,
                             Signal, Slot)
-from PySide6.QtGui import QAction, QColor, QFontDatabase, QGuiApplication, QIcon, QRegion
+from PySide6.QtGui import QAction, QColor, QCursor, QFontDatabase, QGuiApplication, QIcon, QRegion
 from PySide6.QtQuick import QQuickView
 from PySide6.QtQuickControls2 import QQuickStyle
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
@@ -231,6 +231,11 @@ class DockView(QQuickView):
         except Exception:
             self._native_glass = False
         self.nativeGlassChanged.emit()
+
+    @Slot(result="QPointF")
+    def cursorPos(self):
+        """The pointer in window coordinates, wherever it is (hover events can be missed)."""
+        return self.mapFromGlobal(QCursor.pos()).toPointF()
 
     @Slot("QVariantList")
     def updateMask(self, rects):
