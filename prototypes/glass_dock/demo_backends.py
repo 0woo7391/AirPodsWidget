@@ -1,7 +1,7 @@
 """Sample-data backends with the same QML surface as the real ones, for previews and checks."""
 from __future__ import annotations
 
-from PySide6.QtCore import QObject, Property, Signal, Slot
+from PySide6.QtCore import QObject, Property, QTimer, Signal, Slot
 
 
 class DemoAudio(QObject):
@@ -109,3 +109,30 @@ DEMO_APPS = [
     dict(name="Steam", path="C:/Program Files (x86)/Steam/steam.exe"),
     dict(name="문서", path="C:/Users/demo/Documents"),
 ]
+
+
+
+def demo_events(devices: DemoDevices) -> QTimer:
+    """Every 6 s an AirPods event, so the island shows: disconnect, connect, left bud low."""
+    timer = QTimer()
+    step = 0
+
+    def tick():
+        nonlocal step
+        kind = step % 3
+        if kind == 0:
+            devices.data.update(connected=False, status="등록됨 · 미연결")
+            devices.changed.emit()
+        elif kind == 1:
+            devices._batteries[0]["value"] = 80
+            devices.batteriesChanged.emit()
+            devices.connectDevice()
+        else:
+            devices._batteries[0]["value"] = 15
+            devices.batteriesChanged.emit()
+        step += 1
+
+    timer.timeout.connect(tick)
+    timer.start(6000)
+    QTimer.singleShot(1000, tick)
+    return timer

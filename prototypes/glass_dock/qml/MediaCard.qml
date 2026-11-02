@@ -10,6 +10,11 @@ DockCard {
     readonly property bool available: !!media.available
     function command(action) { mediaBackend.command(action, media.token || "", media.identity || "") }
 
+    railIcon: "music"
+    railLabel: available ? media.title || "—" : "재생 중 없음"
+    railStatus: available ? media.artist || media.sourceName || "" : ""
+    railDot: available && media.playing ? Theme.good : "transparent"
+
     summary: Component {
         Item {
             Artwork { x: Theme.pad; y: 14; width: 40; height: 40; source: card.media.artwork || "" }
@@ -40,9 +45,10 @@ DockCard {
 
     detail: Component {
         Item {
-            Artwork { x: Theme.pad; y: Theme.pad; width: 76; height: 76; radius: 14; source: card.media.artwork || "" }
+            Artwork { x: Theme.pad; y: Theme.pad; width: 76; height: 76; radius: 14; source: card.media.artwork || ""; opacity: card.reveal(0); transform: Translate { y: 8 * (1 - card.reveal(0)) } }
             Column {
                 x: Theme.pad + 90; y: Theme.pad + 6; width: parent.width - x - Theme.pad; spacing: 4
+                opacity: card.reveal(1); transform: Translate { y: 8 * (1 - card.reveal(1)) }
                 Text {
                     width: parent.width
                     text: card.available ? card.media.title || "—" : "재생 중인 미디어 없음"
@@ -59,6 +65,7 @@ DockCard {
             Row {
                 anchors.horizontalCenter: parent.horizontalCenter
                 y: parent.height - Theme.pad - 46; spacing: 18
+                opacity: card.reveal(2); transform: Translate { y: 8 * (1 - card.reveal(2)) }
                 GlassButton {
                     anchors.verticalCenter: parent.verticalCenter
                     icon: "next"; mirrorIcon: true; iconSize: 14

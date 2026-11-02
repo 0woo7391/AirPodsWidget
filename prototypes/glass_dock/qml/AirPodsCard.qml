@@ -26,6 +26,11 @@ DockCard {
     readonly property string statusText: device.pending ? "연결 중" : device.connected ? "연결됨"
         : device.paired ? "연결 안 됨" : "설정에서 기기 선택"
 
+    railIcon: "headphones"
+    railLabel: deviceName
+    railStatus: device.connected ? ["L", "R", "C"].map((tag, i) => tag + " " + percent(battery(i).value)).join(" · ") : statusText
+    railDot: device.connected ? Theme.good : device.pending ? Theme.warn : Theme.inkTertiary
+
     summary: Component {
         Item {
             DockIcon { x: Theme.pad; y: 15; size: 16; name: "headphones"; color: Theme.inkSecondary }
@@ -72,14 +77,16 @@ DockCard {
 
     detail: Component {
         Item {
-            DockIcon { x: Theme.pad + 2; y: 20; size: 20; name: "headphones" }
+            DockIcon { x: Theme.pad + 2; y: 20; size: 20; name: "headphones"; opacity: card.reveal(0); transform: Translate { y: 8 * (1 - card.reveal(0)) } }
             Text {
                 x: Theme.pad + 32; y: 15; width: parent.width - x - Theme.pad
+                opacity: card.reveal(0); transform: Translate { y: 8 * (1 - card.reveal(0)) }
                 text: card.deviceName; elide: Text.ElideRight
                 color: Theme.ink; font.family: dockFont; font.pixelSize: 15; font.weight: Font.DemiBold
             }
             Row {
                 x: Theme.pad + 32; y: 35; spacing: 6
+                opacity: card.reveal(1); transform: Translate { y: 8 * (1 - card.reveal(1)) }
                 Rectangle {
                     anchors.verticalCenter: parent.verticalCenter; width: 6; height: 6; radius: 3
                     color: card.device.connected ? Theme.good : card.device.pending ? Theme.warn : Theme.inkTertiary
@@ -97,6 +104,7 @@ DockCard {
                         required property int index
                         readonly property var part: card.battery(index)
                         width: parent.width; height: 18
+                        opacity: card.reveal(2 + index); transform: Translate { y: 8 * (1 - card.reveal(2 + index)) }
                         Text {
                             width: 46; anchors.verticalCenter: parent.verticalCenter
                             text: ["왼쪽", "오른쪽", "케이스"][index]
@@ -126,6 +134,7 @@ DockCard {
             }
             Row {
                 x: Theme.pad; y: parent.height - Theme.pad - 34; spacing: 8
+                opacity: card.reveal(5); transform: Translate { y: 8 * (1 - card.reveal(5)) }
                 GlassButton {
                     width: 128
                     text: card.device.pending ? "연결 중" : card.device.connected ? "연결됨" : "연결"

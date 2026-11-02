@@ -1,0 +1,190 @@
+import QtQuick
+import QtQuick.Effects
+
+// AirPods notice that grows out of a small black pill at the top of the screen.
+// One show runs 4 s: spring open from a = 0, spring closed from a = 3.3, then
+// the resting pill fades. The window is input-transparent, so the island
+// never takes a click.
+Item {
+    id: island
+    width: 470
+    height: 228
+    // One-shot on the desktop, not a loop: the resting pill fades instead of popping off.
+    opacity: 1 - Theme.seg(t, 3.75, duration)
+
+    property string title: ""
+    property string subtitle: ""
+    property string tone: "connected"   // connected | disconnected | low
+    property var batteries: []          // [{label, value, charging}] for L, R, case
+
+    // Seconds since the notification appeared; driven by the frame clock.
+    property real a: 4
+    // Preview/check hook: render one moment of the animation without the clock.
+    property real forcedTime: -1
+    readonly property real t: forcedTime >= 0 ? forcedTime : a
+    readonly property real closeAt: 3.3
+    readonly property real duration: 4
+
+    signal finished()
+
+    function show(newTitle, newSubtitle, newTone, newBatteries) {
+        title = newTitle
+        subtitle = newSubtitle
+        tone = newTone
+        batteries = newBatteries || []
+        a = 0
+    }
+
+    function clamp01(v) { return Math.max(0, Math.min(1, v)) }
+    readonly property real p: t < closeAt ? Theme.spring(13, 0.6, t) : 1 - Theme.spring(15, 0.62, t - closeAt)
+    readonly property real contentOpacity: Theme.seg(t, 0.16, 0.36) * (1 - Theme.seg(t, closeAt, closeAt + 0.12))
+    readonly property color accent: tone === "low" ? Theme.warn : tone === "disconnected" ? "#8E8CA8" : "#38C6FF"
+
+    function levelColor(part) {
+        return part.charging ? Theme.charge : part.value <= 10 ? Theme.bad : part.value <= 20 ? Theme.warn : Theme.good
+    }
+
+    FrameAnimation {
+        running: island.forcedTime < 0 && island.a < island.duration
+        onTriggered: {
+            island.a = Math.min(island.duration, island.a + frameTime)
+            if (island.a >= island.duration) island.finished()
+        }
+    }
+
+    Rectangle {
+        id: card
+        // Whole pixels keep the 2 px rim crisp while the size springs.
+        width: Math.round(128 + 282 * island.p)
+        height: Math.round(36 + 88 * island.p)
+        x: Math.round((island.width - width) / 2)
+        y: 16
+        radius: Math.min(18 + 22 * island.clamp01(island.p), height / 2)
+        color: "#000000"
+        border.width: 2
+        border.color: "#1AFFFFFF"
+        clip: true
+        visible: false
+
+        Rectangle {
+            width: 10; height: 10; radius: 5
+            x: parent.width - 22 - 5
+            anchors.verticalCenter: parent.verticalCenter
+            color: island.accent
+            opacity: island.clamp01(1 - island.p / 0.3) * (0.55 + 0.45 * Math.sin(2 * Math.PI * island.t / 2))
+        }
+
+        Item {
+            anchors.fill: parent
+            opacity: island.contentOpacity
+
+            Rectangle {
+                id: avatar
+                width: 62; height: 62; radius: 31
+                x: 55 - 31
+                anchors.verticalCenter: parent.verticalCenter
+                gradient: Gradient {
+                    orientation: Gradient.Horizontal
+                    GradientStop { position: 0; color: island.tone === "low" ? "#FF7A70" : island.tone === "disconnected" ? "#3A3A48" : "#6E5BFF" }
+                    GradientStop { position: 1; color: island.tone === "low" ? "#FFC861" : island.tone === "disconnected" ? "#5C5A6E" : "#FF5CA8" }
+                }
+                rotation: 45  // turns the horizontal gradient into a top-left to bottom-right one
+                DockIcon {
+                    anchors.centerIn: parent
+                    rotation: -45
+                    size: 30
+                    name: "headphones"
+                    color: "#FFFFFF"
+                }
+            }
+            // Status badge on the avatar: check when connected, ! when low.
+            Rectangle {
+                visible: island.tone !== "disconnected"
+                width: 22; height: 22; radius: 11
+                x: avatar.x + 44; y: avatar.y + 42
+                color: island.tone === "low" ? Theme.warn : Theme.good
+                border.width: 3; border.color: "#000000"
+                Text {
+                    anchors.centerIn: parent
+                    text: island.tone === "low" ? "!" : "✓"
+                    color: "#000000"
+                    font.family: dockFont; font.pixelSize: 12; font.weight: Font.Bold
+                }
+            }
+
+            Text {
+                x: 102
+                width: batteryRow.x - x - 10
+                // Baseline 4 px above the card's center.
+                y: parent.height / 2 - 4 - baselineOffset
+                text: island.title
+                elide: Text.ElideRight
+                color: "#F4F4F8"
+                font.family: dockFont
+                font.pixelSize: 24
+                font.weight: Font.DemiBold
+            }
+            Text {
+                x: 102
+                width: batteryRow.x - x - 10
+                y: parent.height / 2 + 20 - baselineOffset
+                text: island.subtitle
+                elide: Text.ElideRight
+                color: island.tone === "low" ? Theme.warn : "#A3A1C0"
+                font.family: dockFont
+                font.pixelSize: 18
+                font.weight: Font.Medium
+            }
+
+            // L / R / case levels on the right.
+            Row {
+                id: batteryRow
+                x: parent.width - width - 24
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: 10
+                visible: island.batteries.length > 0
+                Repeater {
+                    model: island.batteries
+                    Column {
+                        required property var modelData
+                        required property int index
+                        spacing: 5
+                        opacity: Theme.seg(island.t, 0.3 + 0.06 * index, 0.5 + 0.06 * index)
+                        Text {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            text: ["L", "R", "C"][index]
+                            color: "#A3A1C0"; font.family: dockFont; font.pixelSize: 11; font.weight: Font.DemiBold
+                        }
+                        Text {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            text: modelData.value < 0 ? "—" : modelData.value
+                            color: "#F4F4F8"; font.family: dockFont; font.pixelSize: 17; font.weight: Font.DemiBold
+                            font.features: Theme.numberFeatures
+                        }
+                        Rectangle {
+                            width: 24; height: 4; radius: 2; color: "#26FFFFFF"
+                            Rectangle {
+                                width: modelData.value < 0 ? 0 : Math.max(4, 24 * Math.min(100, modelData.value) / 100 * Theme.seg(island.t, 0.35, 0.8))
+                                height: 4; radius: 2
+                                color: island.levelColor(modelData)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    MultiEffect {
+        source: card
+        anchors.fill: card
+        shadowEnabled: true
+        shadowColor: island.tone === "low" ? "#FFB040" : "#6E5BFF"
+        shadowOpacity: 0.5 * island.clamp01(island.p)
+        shadowBlur: 1.0
+        blurMax: 34
+        shadowHorizontalOffset: 0
+        shadowVerticalOffset: 0
+        visible: island.t < island.duration
+    }
+}

@@ -8,6 +8,10 @@ DockCard {
     readonly property var devices: outputBackend.devices || []
     detailHeight: 52 + Math.max(1, devices.length) * 40 + Theme.pad - 4
 
+    railIcon: kindIcon(audio.kind)
+    railLabel: "출력"
+    railStatus: shortName(audio.name)
+
     function kindIcon(kind) { return kind === "headphones" ? "headphones" : "speaker" }
     function shortName(name) {
         const inner = /\(([^)]+)\)/.exec(name || "")
@@ -31,6 +35,7 @@ DockCard {
         Item {
             Text {
                 x: Theme.pad; y: Theme.pad; text: "출력 장치"
+                opacity: card.reveal(0); transform: Translate { y: 8 * (1 - card.reveal(0)) }
                 color: Theme.inkSecondary; font.family: dockFont; font.pixelSize: 12
             }
             Column {
@@ -39,10 +44,12 @@ DockCard {
                     model: card.devices
                     Rectangle {
                         required property var modelData
+                        required property int index
                         readonly property bool current: modelData.id === card.audio.currentId
                         width: parent.width; height: 36; radius: Theme.radiusInner
+                        transform: Translate { y: 8 * (1 - card.reveal(1 + index)) }
                         color: current ? Theme.wellHover : row.containsMouse ? Theme.well : "transparent"
-                        opacity: modelData.available ? 1 : 0.4
+                        opacity: (modelData.available ? 1 : 0.4) * card.reveal(1 + index)
                         DockIcon {
                             x: 10; anchors.verticalCenter: parent.verticalCenter; size: 16
                             name: card.kindIcon(modelData.kind); color: current ? Theme.ink : Theme.inkSecondary
