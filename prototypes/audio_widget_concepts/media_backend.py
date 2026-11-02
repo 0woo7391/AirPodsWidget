@@ -15,13 +15,19 @@ from PySide6.QtCore import QByteArray, QBuffer, QIODevice, QObject, Property, QS
 from PySide6.QtGui import QImageReader
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
-from services.media_service import MediaService
+from services.media_service import MediaService, _seconds_to_ticks
 
 
 def empty_state():
     return dict(available=False, token="", identity="", title="", artist="", sourceName="",
                 artwork="", playing=False, canPrevious=False, canNext=False, canPlay=False,
-                pending=False, error="", status="허용 앱을 선택하세요")
+                pending=False, error="", status="허용 앱을 선택하세요",
+                position=0.0, duration=0.0, seekable=False)
+
+
+# The state flag that must be set for each command.
+CAPABILITY = {"toggle": "canPlay", "play": "canPlay", "pause": "canPlay",
+              "previous": "canPrevious", "next": "canNext", "seek": "seekable"}
 
 
 def app_name(source):
@@ -82,6 +88,7 @@ class SelectedMediaService(MediaService):
         self._lock = threading.Lock()
         self._revision = 0
         self._policy = ((), "", "")
+        self._follow_any = False
         self._inspect = False
         self._requests = queue.SimpleQueue()
         self._records = []
@@ -94,11 +101,33 @@ class SelectedMediaService(MediaService):
         self._art_deadline = 0
         self._loop = self._task = None
 
-    def configure(self, allowed, source, token=""):
+    def configure(self, allowed, source, token="", follow_any=False):
         with self._lock:
             self._revision += 1
             self._policy = (tuple(allowed), source, token)
+            self._follow_any = follow_any
             return self._revision
+
+    def _playing_target(self, manager, records, playback_status):
+        """Follow-any mode: whatever plays, preferring the one already shown, then Windows' current session."""
+        def playing(record):
+            try:
+                return record[1].get_playback_info().playback_status == playback_status.PLAYING
+            except Exception:
+                return False
+        try:
+            current = manager.get_current_session()
+        except Exception:
+            current = None
+        active = [record for record in records if playing(record)]
+        shown = next((record for record in records if record[0] == self._bound), None)
+        target = (shown if shown in active else
+                  next((record for record in active if record[1] == current), None) or
+                  (active[0] if active else None) or
+                  shown or  # keep a paused session on screen
+                  next((record for record in records if record[1] == current), None))
+        self._bound = target[0] if target else ""
+        return target
 
     def inspect(self, enabled):
         with self._lock:
@@ -179,7 +208,8 @@ class SelectedMediaService(MediaService):
         state.update(available=True, token=token, identity=identity, title=media.title,
                      artist=media.artist, sourceName=app_name(source), artwork=self._artwork,
                      playing=media.playing, canPrevious=media.can_previous,
-                     canNext=media.can_next, canPlay=media.can_play_pause, status="선택한 미디어")
+                     canNext=media.can_next, canPlay=media.can_play_pause, status="선택한 미디어",
+                     position=media.position_seconds, duration=media.duration_seconds, seekable=media.seekable)
         return state
 
     async def tick(self, manager, playback_status):
@@ -188,12 +218,16 @@ class SelectedMediaService(MediaService):
         eligible = [record for record in records if record[2] == source and source in allowed]
         if self._bound_revision != revision:
             self._bound_revision, self._bound, self._ever_bound = revision, chosen, bool(chosen)
-        if not self._bound and not self._ever_bound and len(eligible) == 1:
-            self._bound, self._ever_bound = eligible[0][0], True
-        target = next((record for record in eligible if record[0] == self._bound), None)
+        if self._follow_any:
+            target = self._playing_target(manager, records, playback_status)
+        else:
+            if not self._bound and not self._ever_bound and len(eligible) == 1:
+                self._bound, self._ever_bound = eligible[0][0], True
+            target = next((record for record in eligible if record[0] == self._bound), None)
         state = await self._read_target(target, playback_status)
         if not state["available"]:
-            state["status"] = ("허용 앱을 선택하세요" if not allowed else
+            state["status"] = ("재생 중인 미디어 없음" if self._follow_any else
+                               "허용 앱을 선택하세요" if not allowed else
                                "조작 대상을 선택하세요" if not source else
                                "여러 세션 중 대상을 선택하세요" if not self._bound and len(eligible) > 1 else
                                "선택한 미디어 없음")
@@ -201,7 +235,7 @@ class SelectedMediaService(MediaService):
         while not self._requests.empty():
             request = self._requests.get_nowait()
             completed = request["id"]
-            capability = {"toggle": "canPlay", "previous": "canPrevious", "next": "canNext"}.get(request["action"])
+            capability = CAPABILITY.get(request["action"])
             current_revision = self._snapshot()[0]
             if (request["revision"] != revision or revision != current_revision
                     or request["token"] != state["token"] or request["identity"] != state["identity"]
@@ -212,6 +246,12 @@ class SelectedMediaService(MediaService):
             try:
                 if request["action"] == "toggle":
                     result = await asyncio.wait_for(self._toggle_play_pause(target[1], playback_status), 1.5)
+                elif request["action"] in ("play", "pause"):
+                    method = target[1].try_play_async if request["action"] == "play" else target[1].try_pause_async
+                    result = await asyncio.wait_for(method(), 1.5)
+                elif request["action"] == "seek":
+                    result = await asyncio.wait_for(target[1].try_change_playback_position_async(
+                        _seconds_to_ticks(max(0.0, min(state["duration"], request.get("value") or 0.0)))), 1.5)
                 else:
                     method = (target[1].try_skip_previous_async if request["action"] == "previous"
                               else target[1].try_skip_next_async)
@@ -256,8 +296,9 @@ class MediaBackend(QObject):
     sessionsChanged = Signal()
     preferencesChanged = Signal()
 
-    def __init__(self, service=None, settings=None, parent=None):
+    def __init__(self, service=None, settings=None, parent=None, *, follow_any=False):
         super().__init__(parent)
+        self._follow_any = follow_any
         self.settings = settings if settings is not None else QSettings(
             str(Path(QStandardPaths.writableLocation(QStandardPaths.AppLocalDataLocation)) / "media.ini"),
             QSettings.IniFormat)
@@ -280,9 +321,23 @@ class MediaBackend(QObject):
         self.service = service if service is not None else SelectedMediaService()
         self.service.frameReceived.connect(self._received)
         self.service.errorOccurred.connect(self._failed)
-        self._revision = self.service.configure(self._preferences["allowed"], self._preferences["sourceId"])
+        self._revision = self.service.configure(self._preferences["allowed"], self._preferences["sourceId"],
+                                                follow_any=follow_any)
         self._publish_content()
         self.service.start()
+
+    @Slot(bool)
+    def setFollowAny(self, enabled):
+        """Follow whatever media plays instead of the one app saved in the selection."""
+        if enabled == self._follow_any:
+            return
+        self._follow_any = enabled
+        self._revision = self.service.configure(self._preferences["allowed"], self._preferences["sourceId"],
+                                                follow_any=enabled)
+        self._pending = 0
+        self._state = {**empty_state(), "status": "미디어 확인 중"}
+        self._publish_content()
+        self.changed.emit()
 
     @Property("QVariantMap", notify=changed)
     def state(self):
@@ -379,7 +434,7 @@ class MediaBackend(QObject):
             self.changed.emit()
             return False
         self._preferences = preference
-        self._revision = self.service.configure(preference["allowed"], source, token)
+        self._revision = self.service.configure(preference["allowed"], source, token, follow_any=self._follow_any)
         self._pending = 0
         self._action_error = ""
         self._state = {**empty_state(), "status": "선택한 미디어 확인 중" if source else "허용 앱을 선택하세요"}
@@ -390,7 +445,14 @@ class MediaBackend(QObject):
 
     @Slot(str, str, str)
     def command(self, action, token, identity):
-        capability = {"toggle": "canPlay", "previous": "canPrevious", "next": "canNext"}.get(action)
+        self._submit(action, token, identity)
+
+    @Slot(str, str, float)
+    def seek(self, token, identity, seconds):
+        self._submit("seek", token, identity, seconds)
+
+    def _submit(self, action, token, identity, value=None):
+        capability = CAPABILITY.get(action)
         if (self._stopped or self._pending or not self._state["available"] or not capability
                 or not self._state[capability] or token != self._state["token"]
                 or identity != self._state["identity"]):
@@ -401,7 +463,7 @@ class MediaBackend(QObject):
         self._state.update(pending=True, error="")
         self.changed.emit()
         self.service.submit(dict(id=self._pending, revision=self._revision, action=action,
-                                 token=token, identity=identity))
+                                 token=token, identity=identity, value=value))
 
     @Slot()
     def stop(self):

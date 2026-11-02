@@ -4,7 +4,7 @@ DockCard {
     id: card
     cardId: "airpods"
     summaryHeight: 92
-    detailHeight: 222
+    detailHeight: 246
 
     readonly property var device: deviceBackend.state
     readonly property var batteries: deviceBackend.batteries
@@ -132,9 +132,26 @@ DockCard {
                     }
                 }
             }
+            // In-ear time and an estimate of what the buds have left.
+            Item {
+                x: Theme.pad; y: 158; width: parent.width - Theme.pad * 2; height: 16
+                opacity: card.reveal(5); transform: Translate { y: 8 * (1 - card.reveal(5)) }
+                Text {
+                    text: "착용 오늘 " + dockFeatures.todayUsage + " · 이번 " + dockFeatures.sessionUsage
+                    color: Theme.inkSecondary; font.family: dockFont; font.pixelSize: 11
+                    font.features: Theme.numberFeatures
+                }
+                Text {
+                    anchors.right: parent.right
+                    visible: dockFeatures.remainingUsage.length > 0
+                    text: "약 " + dockFeatures.remainingUsage + " 남음"
+                    color: Theme.inkSecondary; font.family: dockFont; font.pixelSize: 11
+                    font.features: Theme.numberFeatures
+                }
+            }
             Row {
                 x: Theme.pad; y: parent.height - Theme.pad - 34; spacing: 8
-                opacity: card.reveal(5); transform: Translate { y: 8 * (1 - card.reveal(5)) }
+                opacity: card.reveal(6); transform: Translate { y: 8 * (1 - card.reveal(6)) }
                 GlassButton {
                     width: 128
                     text: card.device.pending ? "연결 중" : card.device.connected ? "연결됨" : "연결"

@@ -24,7 +24,21 @@ every 6 s; --capture writes dock-*.png and island-*.png frames.
 Tray settings (saved in dock.ini under the app's local data folder): always on
 top, minimized rail, which screen the dock sits on, and for the island: which
 screen(s) (primary, secondary, all, under the cursor), alignment, top margin,
-which events, and a preview.
+which events, hiding during games, and a preview. Also: AirPods device and
+battery advertisement sources (real mode), low-battery threshold, warning sound
+(volume, during games, preview), following whatever media plays (default) or
+the glass widget's chosen app, pause when a bud leaves the ear / resume when
+both return, and start with Windows.
+
+The real dock reuses the glass widget's saved AirPods, battery sources, output
+and media choices (%LOCALAPPDATA%\GlassAudioWidget). In-ear time is shared with
+the old widget (%LOCALAPPDATA%\AirPodsWidget\usage.json).
+
+The warning sound is assets\low_power_warning.mp3, which you supply (README);
+without it the dock stays silent.
+
+Windows app: .\.venv\Scripts\python.exe -m PyInstaller --clean --noconfirm GlassDock.spec
+then run dist\GlassDock\GlassDock.exe (keep the _internal folder beside it).
 
 Run from the repository root in PowerShell, using the existing environment:
 

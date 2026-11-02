@@ -244,8 +244,10 @@ class DeviceBackend(QObject):
             candidate = pod.battery.percent if pod is not None else None
             value = candidate if candidate is not None else previous.get("value",-1)
             value = value if value is not None and age<=120 else -1
+            # inEar only from a fresh advertisement; a stale one says nothing about the ear.
             rows.append(dict(label=label,value=value,charging=bool(pod and pod.battery.charging and age<=10),
-                             quality="unknown" if value<0 else "fresh" if age<=10 else "cached"))
+                             quality="unknown" if value<0 else "fresh" if age<=10 else "cached",
+                             inEar=bool(pod is not None and getattr(pod,"in_ear",False) and current.in_ear_fresh and age<=10)))
         if rows != self._batteries:
             self._batteries = rows; self.batteriesChanged.emit()
 

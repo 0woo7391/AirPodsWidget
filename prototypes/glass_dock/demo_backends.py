@@ -57,7 +57,8 @@ class DemoMedia(QObject):
         super().__init__()
         self.data = dict(available=True, token="demo", identity="ditto", title="Ditto",
                          artist="NewJeans", sourceName="Spotify", artwork="", playing=True,
-                         pending=False, error="", status="", canPlay=True, canNext=True, canPrevious=True)
+                         pending=False, error="", status="", canPlay=True, canNext=True, canPrevious=True,
+                         position=42.0, duration=185.0, seekable=True)
 
     @Property("QVariantMap", notify=changed)
     def state(self):
@@ -69,9 +70,14 @@ class DemoMedia(QObject):
 
     @Slot(str, str, str)
     def command(self, action, token, identity):
-        if action == "toggle":
-            self.data["playing"] = not self.data["playing"]
+        if action in ("toggle", "play", "pause"):
+            self.data["playing"] = action == "play" or (action == "toggle" and not self.data["playing"])
             self.changed.emit()
+
+    @Slot(str, str, float)
+    def seek(self, token, identity, seconds):
+        self.data["position"] = max(0.0, min(self.data["duration"], seconds))
+        self.changed.emit()
 
 
 class DemoDevices(QObject):
@@ -83,9 +89,9 @@ class DemoDevices(QObject):
         super().__init__()
         self.data = dict(targetId="DEMO", name="AirPods Pro", paired=True, connected=True,
                          pending=False, error="", status="연결됨")
-        self._batteries = [dict(label="L", value=80, charging=False, quality="fresh"),
-                           dict(label="R", value=70, charging=False, quality="fresh"),
-                           dict(label="CASE", value=60, charging=True, quality="fresh")]
+        self._batteries = [dict(label="L", value=80, charging=False, quality="fresh", inEar=True),
+                           dict(label="R", value=70, charging=False, quality="fresh", inEar=True),
+                           dict(label="CASE", value=60, charging=True, quality="fresh", inEar=False)]
 
     @Property("QVariantMap", notify=changed)
     def state(self):

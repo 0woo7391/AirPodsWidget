@@ -4,7 +4,9 @@ Each card shows a summary and expands into its detail while hovered; minimized,
 the dock is a rail of icons that widens into labels. The window spans the dock
 column plus room for an expanded card, and its mask is kept to the column so the
 rest of the window lets clicks through to the desktop. AirPods events (connect,
-disconnect, low battery) show as an island at the top of the chosen screen(s).
+disconnect, low battery) show as an island at the top of the chosen screen(s);
+features.py carries the old widget's sound alert, ear detection, in-ear time,
+game suppression and start with Windows.
 """
 from __future__ import annotations
 
@@ -24,6 +26,8 @@ from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 BASE = Path(__file__).resolve().parent
 PROTOTYPES = BASE.parent
 PROJECT = PROTOTYPES.parent
+if getattr(sys, "frozen", False):  # GlassDock.spec puts qml/ and assets/ at the bundle root
+    BASE = PROJECT = Path(sys._MEIPASS)
 CONCEPT = PROTOTYPES / "audio_widget_concepts"
 for path in (CONCEPT, PROTOTYPES / "glass_audio_widget", PROJECT / "src", BASE):
     sys.path.insert(0, str(path))
@@ -31,12 +35,10 @@ for path in (CONCEPT, PROTOTYPES / "glass_audio_widget", PROJECT / "src", BASE):
 from preview import LucianProvider  # noqa: E402
 from launcher import AppIconProvider, LauncherBackend  # noqa: E402
 from optical import IconMetrics  # noqa: E402
+from features import DockFeatures  # noqa: E402
 
 WINDOW_WIDTH = 340
 EDGE_MARGIN = 12
-LOW_BATTERY = 20     # a bud or the case at or below this warns once
-LOW_BATTERY_RESET = 25
-PART_NAMES = {"L": "왼쪽", "R": "오른쪽", "CASE": "케이스", "C": "케이스"}
 
 
 def dock_settings() -> QSettings:
@@ -73,7 +75,7 @@ class DockView(QQuickView):
     minimizedChanged = Signal()
     nativeGlassChanged = Signal()
 
-    def __init__(self, audio, media, devices, launcher, settings: QSettings, *, always_on_top=False,
+    def __init__(self, audio, media, devices, launcher, features, settings: QSettings, *, always_on_top=False,
                  preview_backdrop=False):
         super().__init__()
         self.setTitle("Glass Dock")
@@ -109,6 +111,7 @@ class DockView(QQuickView):
         context.setContextProperty("mediaBackend", media)
         context.setContextProperty("deviceBackend", devices)
         context.setContextProperty("launcherBackend", launcher)
+        context.setContextProperty("dockFeatures", features)
         context.setContextProperty("previewBackdrop", preview_backdrop)
         self.setSource(QUrl.fromLocalFile(str(BASE / "qml" / "GlassDock.qml")))
         if self.status() == QQuickView.Error:
@@ -270,46 +273,8 @@ class IslandHub(QObject):
             view.setSource(QUrl())
 
 
-def watch_airpods(hub: IslandHub, devices, settings: QSettings):
-    """Island when the AirPods connect or disconnect, and once per part when its battery runs low.
-
-    The state at start is not news; a part warns again only after charging or
-    rising back above LOW_BATTERY_RESET.
-    """
-    connected = bool(devices.state.get("connected"))
-    warned: set[str] = set()
-
-    def name():
-        return devices.state.get("name") or "AirPods"
-
-    def on_device():
-        nonlocal connected
-        now = bool(devices.state.get("connected"))
-        if now and not connected and pref(settings, "island/connect", True):
-            hub.notify(name(), "연결됨", "connected", list(devices.batteries))
-        elif connected and not now and pref(settings, "island/disconnect", True):
-            hub.notify(name(), "연결 해제됨", "disconnected", [])
-            warned.clear()
-        connected = now
-
-    def on_batteries():
-        low = []
-        for part in devices.batteries:
-            label, value, charging = part.get("label"), part.get("value", -1), part.get("charging")
-            if value >= 0 and not charging and value <= LOW_BATTERY:
-                if label not in warned:
-                    warned.add(label)
-                    low.append(f"{PART_NAMES.get(label, label)} {value}%")
-            elif charging or value > LOW_BATTERY_RESET:
-                warned.discard(label)
-        if low and connected and pref(settings, "island/lowBattery", True):
-            hub.notify(name(), "배터리 부족 · " + ", ".join(low), "low", list(devices.batteries))
-
-    devices.changed.connect(on_device)
-    devices.batteriesChanged.connect(on_batteries)
-
-
-def make_tray(view: DockView, hub: IslandHub, settings: QSettings, devices, app: QApplication) -> QSystemTrayIcon:
+def make_tray(view: DockView, hub: IslandHub, features: DockFeatures, settings: QSettings, devices,
+              app: QApplication) -> QSystemTrayIcon:
     tray = QSystemTrayIcon(QIcon(str(PROJECT / "assets" / "app.ico")), app)
     tray.setToolTip("Glass Dock")
     menu = QMenu()
@@ -346,21 +311,83 @@ def make_tray(view: DockView, hub: IslandHub, settings: QSettings, devices, app:
 
     choices(menu, "Dock 화면", "dock/screen", "primary", screen_options, view.placeOnRightEdge)
 
+    if hasattr(devices, "selectDevice"):
+        target = menu.addMenu("AirPods 기기")
+
+        def fill_devices():
+            target.clear()
+            group = QActionGroup(target)
+            current = devices.state.get("targetId", "")
+            for device in devices.devices:
+                action = target.addAction(device.get("name") or device.get("id"))
+                action.setCheckable(True)
+                action.setChecked(device.get("id") == current)
+                group.addAction(action)
+                action.triggered.connect(lambda _=False, key=device.get("id"): devices.selectDevice(key))
+            if not devices.devices:
+                target.addAction("페어링된 기기 없음").setEnabled(False)
+
+        target.aboutToShow.connect(fill_devices)
+        fill_devices()
+
+        # Battery advertisements nearby; at most two of the same model can be bound (glass widget rule).
+        sources = menu.addMenu("배터리 출처")
+
+        def fill_sources():
+            sources.clear()
+            bound = list(devices.batterySources)
+            for item in devices.candidates:
+                address = item.get("address")
+                action = sources.addAction(f"{item.get('name') or '?'} · {address}")
+                action.setCheckable(True)
+                action.setChecked(address in bound)
+
+                def toggle(checked, address=address):
+                    chosen = [a for a in devices.batterySources if a != address] + ([address] if checked else [])
+                    devices.bindSources(chosen)
+                action.toggled.connect(toggle)
+            if not devices.candidates:
+                sources.addAction("케이스를 열고 잠시 기다리세요").setEnabled(False)
+            sources.addSeparator()
+            sources.addAction("초기화").triggered.connect(lambda: devices.bindSources([]))
+
+        sources.aboutToShow.connect(fill_sources)
+        fill_sources()
+
     island = menu.addMenu("아일랜드 알림")
     choices(island, "표시 화면", "island/screens", "primary",
             [("primary", "주 화면"), ("secondary", "보조 화면"), ("all", "모든 화면"), ("cursor", "마우스가 있는 화면")])
     choices(island, "위치", "island/align", "center", [("center", "가운데"), ("left", "왼쪽"), ("right", "오른쪽")])
     choices(island, "위쪽 여백", "island/offset", 0, [(0, "0 px"), (8, "8 px"), (16, "16 px"), (32, "32 px")])
     island.addSeparator()
-    for key, label in (("island/connect", "연결"), ("island/disconnect", "연결 해제"), ("island/lowBattery", "배터리 부족")):
-        action = QAction(label, island, checkable=True)
-        action.setChecked(pref(settings, key, True))
-        action.toggled.connect(lambda value, k=key: settings.setValue(k, value))
-        island.addAction(action)
+    def toggle(parent: QMenu, key: str, label: str):
+        action = QAction(label, parent, checkable=True)
+        action.setChecked(features.get(key))
+        action.toggled.connect(lambda value: features.set(key, value))
+        parent.addAction(action)
+
+    for key, label in (("island/connect", "연결"), ("island/disconnect", "연결 해제"),
+                       ("island/lowBattery", "배터리 부족"), ("island/suppressDuringGames", "게임 중 숨기기")):
+        toggle(island, key, label)
     island.addSeparator()
     preview = island.addAction("미리 보기")
     preview.triggered.connect(lambda: hub.notify(devices.state.get("name") or "AirPods", "연결됨", "connected",
                                                  list(devices.batteries)))
+
+    battery = menu.addMenu("배터리 경고")
+    choices(battery, "기준", "battery/threshold", 20, [(10, "10%"), (15, "15%"), (20, "20%"), (30, "30%")])
+    toggle(battery, "battery/sound", "경고음")
+    choices(battery, "경고음 크기", "battery/soundVolume", 60, [(30, "30%"), (60, "60%"), (100, "100%")])
+    toggle(battery, "battery/soundDuringGames", "게임 중에도 경고음")
+    battery.addAction("경고음 미리 듣기").triggered.connect(features.play_alert)
+
+    media = menu.addMenu("미디어")
+    toggle(media, "media/followAny", "재생 중인 아무 앱이나 따라가기")
+    media.addSeparator()
+    toggle(media, "media/autoPause", "귀에서 빼면 일시정지")
+    toggle(media, "media/autoResume", "다시 끼면 재생")
+
+    toggle(menu, "system/startWithWindows", "Windows 시작 시 실행")
 
     menu.addSeparator()
     quit_action = QAction("종료", menu)
@@ -385,7 +412,13 @@ def real_backends():
     from audio_backend import AudioBackend
     from media_backend import MediaBackend
     from device_backend import DeviceBackend
-    return AudioBackend(), MediaBackend(), DeviceBackend(), LauncherBackend()
+    # Reuse the glass widget's saved AirPods, battery sources, output and media choices.
+    shared = Path(QStandardPaths.writableLocation(QStandardPaths.AppLocalDataLocation)).parent / "GlassAudioWidget"
+
+    def ini(name):
+        return QSettings(str(shared / name), QSettings.IniFormat)
+    return (AudioBackend(settings=ini("output.ini")), MediaBackend(settings=ini("media.ini")),
+            DeviceBackend(settings=ini("devices.ini")), LauncherBackend())
 
 
 def capture(view: DockView, hub: IslandHub, devices, app: QApplication, folder: Path) -> int:
@@ -451,9 +484,14 @@ def main() -> int:
     # Previews must not read or change the user's dock settings.
     settings = QSettings(str(Path(tempfile.mkdtemp(prefix="glass-dock-capture-")) / "dock.ini"),
                          QSettings.IniFormat) if previewing else dock_settings()
-    view = DockView(audio, media, devices, launcher, settings, always_on_top=args.on_top,
+    # Sample data must not count towards the real in-ear time.
+    usage_path = Path(tempfile.mkdtemp(prefix="glass-dock-usage-")) / "usage.json" if demo else None
+    features = DockFeatures(devices, media, settings, PROJECT / "assets" / "low_power_warning.mp3",
+                            usage_path=usage_path)
+    view = DockView(audio, media, devices, launcher, features, settings, always_on_top=args.on_top,
                     preview_backdrop=previewing)
     hub = IslandHub(view, settings)
+    features.notice.connect(hub.notify)
     if previewing:
         view.resize(WINDOW_WIDTH + 40, 760)
         view.show()
@@ -468,15 +506,16 @@ def main() -> int:
     view.show()
     view.applyNativeGlass()
     view.followScreens(app)
-    watch_airpods(hub, devices, settings)
+    features.apply_startup()
     if demo:
         from demo_backends import demo_events
         demo_timer = demo_events(devices)  # noqa: F841 - kept alive for the app's lifetime
-    tray = make_tray(view, hub, settings, devices, app)
+    tray = make_tray(view, hub, features, settings, devices, app)
     for owner in (audio, media, devices):
         if hasattr(owner, "stop"):
             app.aboutToQuit.connect(owner.stop)
     app.aboutToQuit.connect(tray.hide)
+    app.aboutToQuit.connect(features.save)
     code = app.exec()
     hub.close()
     view.setSource(QUrl())
