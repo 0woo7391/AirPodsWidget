@@ -71,15 +71,26 @@ Item {
     }
     property real magnifyAmount: magnifyTarget
     Behavior on magnifyAmount { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
-    transform: Scale {
-        origin.x: card.mirrored ? 0 : card.width; origin.y: card.cellHeight / 2
-        xScale: 1 + card.magnifyAmount; yScale: 1 + card.magnifyAmount
+    // While dragged the cards stay locked to the grip; only after the drop do they
+    // spring the last stretch (onto a snap point, or back from past an end).
+    property real followY: dock ? dock.columnY : 0
+    Behavior on followY {
+        enabled: !!card.dock && card.dock.settling
+        SpringAnimation { spring: 18; damping: 0.5; epsilon: 0.1 }
     }
+    transform: [
+        Scale {
+            origin.x: card.mirrored ? 0 : card.width; origin.y: card.cellHeight / 2
+            xScale: 1 + card.magnifyAmount; yScale: 1 + card.magnifyAmount
+        },
+        Translate { y: card.dock ? card.followY - card.dock.columnY : 0 }
+    ]
 
     GlassSurface {
         anchors.fill: parent
         radius: Theme.radius - (Theme.radius - 16) * card.railness
         lit: hover.hovered || card.expanded
+        lift: card.dock ? 0.7 * card.dock.dragLift : 0
     }
     // The open card's rim glows toward the flyout, tying the two together.
     Rectangle {

@@ -84,14 +84,17 @@ Item {
     // ---- input mask -------------------------------------------------------------
     function scheduleMask() { maskTimer.restart() }
     function pushMask() {
-        const morphing = railness > 0 && railness < 1
+        // Moving or morphing: open the column's whole vertical band so nothing is clipped
+        // mid-motion; the tight shape comes back once it has settled.
+        const morphing = railness > 0 && railness < 1 || moving
         const widest = rail && (pointer.hovered || railOpen > 0) ? Theme.railWidth + Theme.railLabelWidth : column.width
-        const w = morphing ? Theme.dockWidth : widest
+        const w = morphing ? Math.max(Theme.dockWidth, widest) : widest
         const top = morphing ? 0 : column.y - 24        // the grip sits above the column
         const h = morphing ? height : column.height + 30
         const left = mirrored ? column.x : column.x + column.width - w
-        // Outset so magnified cells and antialiased rims are never clipped.
-        const rects = [[left - 10, top - 6, w + 20, h + 12]]
+        // Outset so magnified cells, antialiased rims and the lifted shadow are never clipped.
+        const pad = moving ? 40 : 10
+        const rects = [[left - pad, top - 6, w + 2 * pad, h + 12]]
         if (activeCard.length || flyout.visible) {
             // The flyout's whole lane, so it can slide between cards without reshaping the window.
             const laneLeft = mirrored ? column.x + column.width : column.x - Theme.detailWidth - 60
@@ -107,9 +110,25 @@ Item {
     onOrderChanged: scheduleMask()
     onRailnessChanged: if (railness === 0 || railness === 1 || railness > 0.001 && railness < 0.05) scheduleMask()
     onRailOpenChanged: if (railOpen === 0 || railOpen > 0.99) scheduleMask()
+    onMovingChanged: scheduleMask()
 
     // ---- vertical position ------------------------------------------------------
     property real position: dockPrefs.get("dock/position")
+    // Dragging, or the cards still springing into place after the drop.
+    readonly property bool moving: grip.held || settle.running
+    // Cards spring only here, after the drop; a new grab stops it (see the grip).
+    readonly property bool settling: settle.running
+    readonly property real columnY: column.y
+    // Picked-up feel while the grip is held: the column swells a touch and casts a shadow.
+    property real dragLift: grip.dragging ? 1 : 0
+    Behavior on dragLift { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+    Timer { id: settle; interval: 700 }
+    // Past either end the dock gives way less and less, like a rubber band.
+    function rubber(value, low, high) {
+        if (value < low) return low - (low - value) * 0.35 / (1 + (low - value) / 160)
+        if (value > high) return high + (value - high) * 0.35 / (1 + (value - high) / 160)
+        return value
+    }
     Connections {
         target: dockPrefs
         function onChanged(key) { if (key === "dock/position") dock.position = dockPrefs.get(key) }
@@ -181,9 +200,13 @@ Item {
         // Plain x, not anchors: switching left/right anchors at run time leaves both attached.
         x: dock.mirrored ? 12 : dock.width - width - 12
         // Centre at the saved position along the edge, kept fully on screen (room for the grip above).
-        readonly property real centre: (grip.dragging ? grip.dragPosition : dock.position) * dock.height
-        y: Math.max(30, Math.min(dock.height - height - 12, centre - height / 2))
-        onYChanged: if (!(dock.railness > 0 && dock.railness < 1) && !grip.dragging) dock.scheduleMask()
+        readonly property real minY: 30
+        readonly property real maxY: dock.height - height - 12
+        readonly property real wantY: (grip.held ? grip.dragPosition : dock.position) * dock.height - height / 2
+        y: grip.held ? dock.rubber(wantY, minY, maxY) : Math.max(minY, Math.min(maxY, wantY))
+        scale: 1 + 0.02 * dock.dragLift
+        transformOrigin: dock.mirrored ? Item.Left : Item.Right
+        onYChanged: if (!(dock.railness > 0 && dock.railness < 1) && !dock.moving) dock.scheduleMask()
         onHeightChanged: if (!(dock.railness > 0 && dock.railness < 1)) dock.scheduleMask()
 
         AirPodsCard {
@@ -226,7 +249,11 @@ Item {
     // ---- drag grip: move the dock up and down its edge --------------------------
     Item {
         id: grip
+        objectName: "grip"
         readonly property bool dragging: drag.active
+        // Follows the drag, but is released only after the drop position is saved, so the
+        // column never flashes back to its old place between the two.
+        property bool held: false
         property real dragPosition: 0.5
         property real startPosition: 0.5
         width: 56; height: 20
@@ -236,8 +263,9 @@ Item {
         Behavior on opacity { NumberAnimation { duration: 160 } }
         Rectangle {
             anchors.centerIn: parent
-            width: grip.dragging || gripHover.hovered ? 40 : 30; height: 5; radius: 2.5
-            color: Theme.ink
+            width: grip.dragging ? 48 : gripHover.hovered ? 40 : 30; height: 5; radius: 2.5
+            color: grip.dragging ? Theme.charge : Theme.ink
+            Behavior on color { ColorAnimation { duration: 140 } }
             Behavior on width { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
         }
         HoverHandler { id: gripHover; cursorShape: Qt.SizeVerCursor }
@@ -249,13 +277,22 @@ Item {
                 if (active) {
                     grip.startPosition = dock.position
                     grip.dragPosition = dock.position
+                    settle.stop()
+                    grip.held = true
                     dock.openCard = ""
                 } else {
-                    dockPrefs.set("dock/position", grip.dragPosition)
-                    dock.scheduleMask()
+                    // Drop: back inside the screen, onto the top, middle or bottom when close
+                    // to one; the cards spring the rest of the way (settle).
+                    const h = column.height
+                    let y = Math.max(column.minY, Math.min(column.maxY, grip.dragPosition * dock.height - h / 2))
+                    for (const stop of [column.minY, (dock.height - h) / 2, column.maxY])
+                        if (Math.abs(y - stop) < 36) { y = stop; break }
+                    settle.restart()
+                    dockPrefs.set("dock/position", (y + h / 2) / dock.height)
+                    grip.held = false
                 }
             }
-            onActiveTranslationChanged: grip.dragPosition = Math.max(0, Math.min(1, grip.startPosition + activeTranslation.y / dock.height))
+            onActiveTranslationChanged: grip.dragPosition = grip.startPosition + activeTranslation.y / dock.height
         }
     }
 
