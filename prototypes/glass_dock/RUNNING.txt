@@ -1,0 +1,29 @@
+Glass Dock prototype (Windows)
+
+A column of glass cards on the right edge of the desktop. Each card shows a
+summary and grows into its detail while the pointer rests on it. The dock
+reserves no screen space, sits behind other windows by default, and lets
+clicks outside the cards pass through to the desktop.
+
+Cards: AirPods (battery, connect, switch output), media, volume, output
+device, quick launch. Drop apps, shortcuts or folders on the quick-launch
+card to add them; right-click a tile twice to remove it.
+
+Run from the repository root in PowerShell, using the existing environment:
+
+  .\.venv\Scripts\python.exe prototypes\glass_dock\dock.py
+  .\.venv\Scripts\python.exe prototypes\glass_dock\dock.py --demo      (sample data)
+  .\.venv\Scripts\python.exe prototypes\glass_dock\dock.py --on-top    (above other windows)
+
+Preview PNGs without a desktop (sample data, stand-in wallpaper):
+
+  .\.venv\Scripts\python.exe prototypes\glass_dock\dock.py --capture design-previews\glass-dock
+
+The tray icon has "항상 위에 표시" and "종료".
+
+Icons are placed by their optical center (optical.py): the ink's bounding-box
+center blended with its alpha centroid, not the 24x24 canvas center.
+
+Not yet verified on Windows: the Acrylic backdrop together with the window
+mask, click-through outside the cards, and WindowStaysOnBottomHint behaviour
+with Win+D.
