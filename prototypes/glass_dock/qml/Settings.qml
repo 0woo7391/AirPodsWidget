@@ -338,6 +338,15 @@ Rectangle {
                     label: "가장자리"
                     PrefChoice { key: "dock/edge"; options: [{ value: "left", label: "왼쪽" }, { value: "right", label: "오른쪽" }] }
                 }
+                SettingRow {
+                    label: "세로 위치"
+                    hint: "dock 위에 마우스를 올리면 나오는 손잡이를 끌어 위아래로 옮깁니다."
+                    GlassButton {
+                        text: "가운데로"
+                        enabled: Math.abs(root.pref("dock/position") - 0.5) > 0.005
+                        onClicked: dockPrefs.set("dock/position", 0.5)
+                    }
+                }
                 Rectangle {
                     visible: root.onSeam()
                     width: parent.width; height: seamText.implicitHeight + 20; radius: 10

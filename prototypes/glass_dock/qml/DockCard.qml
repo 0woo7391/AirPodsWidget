@@ -1,15 +1,15 @@
 import QtQuick
 
-// A dock cell. As a bento card it shows `summary` and grows into `detail` while
-// the pointer rests on it; as a rail row (minimized dock) it shows an icon that
-// widens into a label on hover and opens `detail` on click. The cell keeps its
-// place; only its glass panel grows, toward the free space on the left, and
-// floats above the others.
+// A dock cell. As a bento card it shows `summary`; as a rail row (minimized
+// dock) it shows an icon that widens into a label. The cell never grows or
+// moves: its `detail` opens in the dock's shared flyout beside the column, so
+// the other cells stay visible and reachable. The dock decides which card is
+// open (dock.openCard) from the hover reports below.
 Item {
     id: card
     property string cardId: ""
     property Item dock
-    // Position of this cell inside the dock, for keeping the grown panel on screen.
+    // Position of this cell inside the dock, for placing the flyout beside it.
     property real dockLeft: 0
     property real dockTop: 0
     property real summaryHeight: 84
@@ -33,54 +33,34 @@ Item {
     readonly property real railness: dock ? dock.railness : 0
     readonly property real railOpen: dock ? dock.railOpen : 0
     readonly property bool rail: railness > 0.5
-    // Docked on the left edge: panels grow to the right and rail icons sit on the left.
+    // Docked on the left edge: rail icons sit on the left.
     readonly property bool mirrored: dock ? dock.mirrored : false
-    function anchoredX(width) {
-        return mirrored ? Math.max(panel.minX, Math.min(0, panel.maxRight - width))
-                        : Math.max(panel.minX, Math.min(card.width - width, panel.maxRight - width))
-    }
     readonly property real cellHeight: summaryHeight + (railHeight - summaryHeight) * railness
+    readonly property alias hovered: hover.hovered
 
-    property bool open: false
-    readonly property bool expanded: expandable && (dock && dock.forcedCard.length ? dock.forcedCard === cardId : open)
-    onRailChanged: open = false
+    readonly property bool expanded: expandable && !!dock
+        && (dock.forcedCard.length ? dock.forcedCard === cardId : dock.openCard === cardId)
 
-    // Spring-driven open/close. Width leads and height follows 40 ms later, so
-    // the panel unfolds instead of stretching as one box.
+    // Spring-driven open/close of this card's share of the flyout; the detail
+    // rows read it through reveal().
     property real springTime: 1
-    property real fromW: 0
-    property real fromH: 0
+    property real springFrom: 0
     property real springTo: 0
-    readonly property bool opening: springTo > 0
-    function springAt(time) { return opening ? Theme.spring(17, 0.72, time) : Theme.spring(22, 0.9, time) }
-    readonly property real progressW: fromW + (springTo - fromW) * springAt(springTime)
-    readonly property real progressH: fromH + (springTo - fromH) * springAt(springTime - 0.04)
-    readonly property real progress: Math.max(0, progressW)
+    function springAt(time) { return springTo > 0 ? Theme.spring(17, 0.72, time) : Theme.spring(22, 0.9, time) }
+    readonly property real progress: Math.max(0, springFrom + (springTo - springFrom) * springAt(springTime))
     onExpandedChanged: {
-        fromW = progressW
-        fromH = progressH
+        springFrom = progress
         springTo = expanded ? 1 : 0
         springTime = 0
-        if (dock) dock.scheduleMask()
     }
     FrameAnimation {
         running: card.springTime < 0.9
-        onTriggered: {
-            card.springTime = Math.min(0.9, card.springTime + frameTime)
-            if (card.springTime >= 0.9 && !card.expanded && card.dock) card.dock.scheduleMask()
-        }
+        onTriggered: card.springTime = Math.min(0.9, card.springTime + frameTime)
     }
     // Detail rows come in one after another; detail components call this per row.
     function reveal(row) { return Theme.seg(progress, 0.22 + 0.07 * row, 0.62 + 0.07 * row) }
 
     implicitHeight: cellHeight
-    z: progress > 0.001 ? 10 : 0
-
-    // Step back while another card is grown over this one.
-    readonly property bool dimmed: dock && dock.activeCard.length > 0 && dock.activeCard !== cardId
-    property real dimAmount: dimmed ? 1 : 0
-    Behavior on dimAmount { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
-    opacity: 1 - (1 - Theme.dimmedOpacity) * dimAmount
 
     // Cursor magnification: the cell nearest the pointer swells the most.
     readonly property real magnifyTarget: {
@@ -91,94 +71,58 @@ Item {
     }
     property real magnifyAmount: magnifyTarget
     Behavior on magnifyAmount { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
-    readonly property real cellScale: (1 + magnifyAmount) * (1 - (1 - Theme.dimmedScale) * dimAmount)
-    transform: Scale { origin.x: card.mirrored ? 0 : card.width; origin.y: card.cellHeight / 2; xScale: card.cellScale; yScale: card.cellScale }
-
-    // Input/visual envelope of the grown panel (with room for its shadow), or null at rest.
-    function maskRect() {
-        if (!expanded && progress <= 0.001) return null
-        const w = detailWidth * 1.04
-        const h = detailHeight * 1.04
-        const x = anchoredX(w)
-        const y = Math.max(panel.minY, Math.min(0, panel.maxBottom - h))
-        const p = card.mapToItem(dock, x, y)
-        return [p.x - 24, p.y - 16, w + 48, h + 48]
+    transform: Scale {
+        origin.x: card.mirrored ? 0 : card.width; origin.y: card.cellHeight / 2
+        xScale: 1 + card.magnifyAmount; yScale: 1 + card.magnifyAmount
     }
 
+    GlassSurface {
+        anchors.fill: parent
+        radius: Theme.radius - (Theme.radius - 16) * card.railness
+        lit: hover.hovered || card.expanded
+    }
+    // The open card's rim glows toward the flyout, tying the two together.
+    Rectangle {
+        visible: opacity > 0
+        opacity: Math.min(1, card.progress)
+        width: 3; height: Math.min(card.cellHeight - 24, 40); radius: 1.5
+        anchors.verticalCenter: parent.verticalCenter
+        x: card.mirrored ? card.width - width - 1 : 1
+        color: Theme.charge
+    }
     Item {
-        id: panel
-        readonly property real margin: 10
-        readonly property real minX: -card.dockLeft + margin
-        readonly property real maxRight: (card.dock ? card.dock.width : 0) - card.dockLeft - margin
-        readonly property real minY: -card.dockTop + margin
-        readonly property real maxBottom: (card.dock ? card.dock.height : 0) - card.dockTop - margin
-
-        width: card.width + (card.detailWidth - card.width) * card.progressW
-        height: card.cellHeight + (card.detailHeight - card.cellHeight) * Math.max(0, card.progressH)
-        // Grow inward from the cell's outer edge, then keep inside the window.
-        x: card.anchoredX(width)
-        y: Math.max(minY, Math.min(0, maxBottom - height))
-
-        GlassSurface {
-            anchors.fill: parent
-            radius: Theme.radius - (Theme.radius - 16) * card.railness * (1 - card.progress)
-            lifted: card.progress > 0.02
-            lift: Math.min(1, card.progress)
-            lit: hover.hovered
+        anchors.fill: parent
+        clip: card.railness > 0 && card.railness < 1
+        Loader {
+            // Pinned to the cell's own footprint so the summary never reflows mid-motion.
+            width: card.width
+            height: card.summaryHeight
+            x: card.mirrored ? 0 : parent.width - width
+            sourceComponent: card.summary
+            opacity: 1 - card.railness
+            visible: opacity > 0
+            enabled: !card.rail
         }
-        Item {
-            anchors.fill: parent
-            clip: (card.progress > 0 && card.progress < 1) || (card.railness > 0 && card.railness < 1)
-            readonly property real away: Theme.seg(card.progress, 0, 0.35)
-            Loader {
-                // Pinned to the cell's own footprint so the summary never reflows mid-motion.
-                width: card.width
-                height: card.summaryHeight
-                x: card.mirrored ? 0 : parent.width - width
-                sourceComponent: card.summary
-                opacity: (1 - card.railness) * (1 - parent.away)
-                scale: 1 - 0.03 * parent.away
-                transformOrigin: card.mirrored ? Item.TopLeft : Item.TopRight
-                visible: opacity > 0
-                enabled: !card.rail && card.progress < 0.1
-            }
-            Loader {
-                width: card.width
-                height: card.railHeight
-                x: card.mirrored ? 0 : parent.width - width
-                active: card.railness > 0
-                sourceComponent: card.railContent ? card.railContent : railRow
-                opacity: card.railness * (1 - parent.away)
-                visible: opacity > 0
-                enabled: card.rail && card.progress < 0.1
-            }
-            Loader {
-                width: card.detailWidth
-                height: card.detailHeight
-                x: card.mirrored ? 0 : parent.width - width
-                active: card.expandable
-                sourceComponent: card.detail
-                opacity: Theme.seg(card.progress, 0.15, 0.5)
-                visible: opacity > 0
-                enabled: card.progress > 0.9
-            }
-        }
-        HoverHandler {
-            id: hover
-            onHoveredChanged: {
-                if (!card.expandable) return
-                if (hovered) { closeTimer.stop(); if (!card.rail) openTimer.restart() }
-                else { openTimer.stop(); closeTimer.restart() }
-            }
-        }
-        // On the rail, hovering only widens the labels; a click opens the detail.
-        TapHandler {
-            enabled: card.rail && card.expandable && !card.expanded
-            onTapped: card.open = true
+        Loader {
+            width: card.width
+            height: card.railHeight
+            x: card.mirrored ? 0 : parent.width - width
+            active: card.railness > 0
+            sourceComponent: card.railContent ? card.railContent : railRow
+            opacity: card.railness
+            visible: opacity > 0
+            enabled: card.rail
         }
     }
-    Timer { id: openTimer; interval: Theme.hoverOpenDelay; onTriggered: card.open = true }
-    Timer { id: closeTimer; interval: Theme.hoverCloseDelay; onTriggered: card.open = false }
+    HoverHandler {
+        id: hover
+        onHoveredChanged: if (card.dock) card.dock.cardHover(card, hovered)
+    }
+    // On the rail, hovering only widens the labels; a click opens the detail.
+    TapHandler {
+        enabled: card.rail && card.expandable && !card.expanded && !!card.dock
+        onTapped: card.dock.openNow(card.cardId)
+    }
 
     Component {
         id: railRow

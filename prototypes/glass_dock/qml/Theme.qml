@@ -18,8 +18,6 @@ QtObject {
     readonly property color glassFillFallback: "#8C1B1B21"
     // A grown card floats over its neighbours, so it must hide them.
     readonly property color glassFillLifted: "#EB1C1C22"
-    readonly property real dimmedOpacity: 0.45
-    readonly property real dimmedScale: 0.97
     readonly property color stroke: "#29FFFFFF"
     readonly property color strokeLit: "#66FFFFFF"
     readonly property color well: "#1AFFFFFF"

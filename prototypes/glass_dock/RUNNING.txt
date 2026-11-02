@@ -9,12 +9,18 @@ Cards: AirPods (battery, connect, switch output), media, volume, output
 device, quick launch. Drop apps, shortcuts or folders on the quick-launch
 card to add them; right-click a tile twice to remove it.
 
-Pointer near the dock swells the nearest card; resting on a card unfolds it
-(spring) into its detail. Quick-launch tiles swell toward the pointer, show
-their name in a bubble and hop when launched.
+Pointer near the dock swells the nearest card. Resting on a card opens its
+detail in a flyout beside the dock; the cards never grow over each other, so
+the rest stay reachable. Moving to another card slides the flyout there after
+a short pause (none if the pointer reaches the flyout first). Leaving both
+closes it. Quick-launch tiles swell toward the pointer, show their name in a
+bubble and hop when launched.
+
+Hover the dock to show a grip above it; drag the grip to move the dock up and
+down its edge. The position is saved (settings > 화면 > 세로 위치 resets it).
 
 Minimized (tray: 최소화 (레일)) the dock is a rail of icons with status dots;
-hovering widens it into labels, clicking a row opens its detail.
+hovering widens it into labels, clicking a row opens its detail in the flyout.
 
 An island grows out of a black pill at the top of the screen for 4 s when the
 AirPods connect, disconnect, or a bud/case drops to 20% or lower (once until it

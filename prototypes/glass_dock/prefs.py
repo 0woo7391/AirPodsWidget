@@ -17,7 +17,7 @@ MODULE_NAMES = {"airpods": "AirPods", "media": "미디어", "volume": "볼륨", 
 DEFAULTS = {
     # Dock: "auto" screen is the outermost one on the chosen edge, so the dock never
     # sits on the seam between two monitors.
-    "dock/screen": "auto", "dock/edge": "right", "dock/minimized": False, "dock/alwaysOnTop": False,
+    "dock/screen": "auto", "dock/edge": "right", "dock/position": 0.5, "dock/minimized": False, "dock/alwaysOnTop": False,
     "dock/modules": json.dumps([{"id": m, "visible": True} for m in MODULES]),
     # Island: primary | dock | all | cursor | <screen name>
     "island/screens": "primary", "island/align": "center", "island/offset": 0,

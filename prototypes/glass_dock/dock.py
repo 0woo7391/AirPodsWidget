@@ -38,7 +38,7 @@ from optical import IconMetrics  # noqa: E402
 from features import DockFeatures  # noqa: E402
 from prefs import DockPrefs, screens_in_order  # noqa: E402
 
-WINDOW_WIDTH = 340
+WINDOW_WIDTH = 540   # dock column plus the flyout beside it
 EDGE_MARGIN = 12
 
 
@@ -389,7 +389,7 @@ def capture(view: DockView, hub: IslandHub, settings_view: SettingsView, prefs: 
               ("rail", "", True, -1, 0, "right"), ("rail-open", "", True, 300, 1, "right"),
               ("rail-airpods", "airpods", True, -1, 0, "right"),
               ("left-summary", "", False, -1, -1, "left"), ("left-media", "media", False, -1, -1, "left"),
-              ("left-rail-open", "", True, 300, 1, "left")]
+              ("left-rail-open", "", True, 300, 1, "left"), ("raised-media", "media", False, -1, -1, "right")]
     pages = ["screen", "modules", "island", "airpods", "media", "general"]
     moments = [0.05, 0.3, 1.5, 3.5]
     tones = [("connected", "연결됨"), ("low", "배터리 부족 · 왼쪽 15%"), ("disconnected", "연결 해제됨")]
@@ -408,6 +408,7 @@ def capture(view: DockView, hub: IslandHub, settings_view: SettingsView, prefs: 
             return
         _, card, rail, pointer_y, rail_open, edge = states[index]
         prefs.set("dock/edge", edge)
+        prefs.set("dock/position", 0.2 if states[index][0].startswith("raised") else 0.5)
         view.resize(WINDOW_WIDTH + 40, 760)
         view.setMinimized(rail)
         root.setProperty("forcedCard", card)
