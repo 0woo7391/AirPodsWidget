@@ -418,7 +418,7 @@ def real_backends():
     def ini(name):
         return QSettings(str(shared / name), QSettings.IniFormat)
     return (AudioBackend(settings=ini("output.ini")), MediaBackend(settings=ini("media.ini")),
-            DeviceBackend(settings=ini("devices.ini")), LauncherBackend())
+            DeviceBackend(settings=ini("devices.ini"), auto_sources=True), LauncherBackend())
 
 
 def capture(view: DockView, hub: IslandHub, devices, app: QApplication, folder: Path) -> int:

@@ -33,8 +33,15 @@ class DeviceBackend(QObject):
     connectionHint = Signal()
     _result = Signal(object)
 
-    def __init__(self, service=bluetooth_status, scanner=None, settings=None, *, start=True, clock=time.monotonic):
+    # Auto sources: with no source bound and the registered AirPods connected, accept the
+    # nearest AirPods advertisement (one model per session), like the original widget does.
+    AUTO_RSSI = -70
+
+    def __init__(self, service=bluetooth_status, scanner=None, settings=None, *, start=True, clock=time.monotonic,
+                 auto_sources=False):
         super().__init__()
+        self.auto_sources = auto_sources
+        self._auto_model = None
         self.service, self.clock = service, clock
         self.settings = settings if settings is not None else QSettings(
             str(Path(QStandardPaths.writableLocation(QStandardPaths.AppLocalDataLocation)) / "devices.ini"), QSettings.IniFormat)
@@ -123,7 +130,7 @@ class DeviceBackend(QObject):
         if not self._save({"bluetooth/target": target, "bluetooth/name": device.get("name", ""), "battery/sources": "[]"}):
             return False
         self.target, self.sources = target, []
-        self._manager.reset(); self._valid_at.clear(); self._hinted = False
+        self._manager.reset(); self._valid_at.clear(); self._hinted = False; self._auto_model = None
         self._state.update(targetId=target, name=device.get("name", ""), paired=bool(device),
                            connected=device.get("connected", False), error="",
                            status="연결됨" if device.get("connected") else "등록됨 · 미연결")
@@ -142,7 +149,7 @@ class DeviceBackend(QObject):
         selected = [dict(address=a, model=known[a]["model"]) for a in addresses]
         if not self._save({"battery/sources": json.dumps(selected)}): return False
         self.sources = selected
-        self._manager.reset(); self._valid_at.clear()
+        self._manager.reset(); self._valid_at.clear(); self._auto_model = None
         self._state["error"] = ""
         self.candidatesChanged.emit(); self.changed.emit(); self.refresh()
         return True
@@ -200,7 +207,7 @@ class DeviceBackend(QObject):
             self._state["error"] = result["error"]
         if not self._state["pending"]:
             self._state["status"] = "연결됨" if self._state["connected"] else "등록됨 · 미연결" if self._state["paired"] else "등록 장치 미감지"
-        if previous and not self._state["connected"]: self._hinted = False
+        if previous and not self._state["connected"]: self._hinted = False; self._auto_model = None
         self.changed.emit()
         if (records is not None and self.target and self._state["paired"] and not self._state["connected"]
                 and not self._state["pending"] and not self._hinted and self.clock() - self._last_hint > 90):
@@ -215,13 +222,23 @@ class DeviceBackend(QObject):
         address = advertisement.address.upper()
         self._nearby[address] = dict(address=address, model=advertisement.model_id,
                                      name=advertisement.state.model_name, seen=self.clock())
-        if not self.target or not any(v["address"] == address and v["model"] == advertisement.model_id for v in self.sources): return
+        if not self.target: return
+        if self.sources:
+            if not any(v["address"] == address and v["model"] == advertisement.model_id for v in self.sources): return
+        elif not self._auto_accept(advertisement): return
         self._manager.update(advertisement)
         if not self._manager.last_update_accepted: return
         for name in ("left", "right", "case"):
             if getattr(advertisement.state, name).battery.percent is not None:
                 self._valid_at[name] = self.clock()
         self.refresh()
+
+    def _auto_accept(self, advertisement):
+        if not self.auto_sources or not self._state["connected"] or advertisement.rssi < self.AUTO_RSSI:
+            return False
+        if self._auto_model is None:
+            self._auto_model = advertisement.model_id
+        return advertisement.model_id == self._auto_model
 
     @Slot(str)
     def _scan_error(self, message):
@@ -244,10 +261,14 @@ class DeviceBackend(QObject):
             candidate = pod.battery.percent if pod is not None else None
             value = candidate if candidate is not None else previous.get("value",-1)
             value = value if value is not None and age<=120 else -1
-            # inEar only from a fresh advertisement; a stale one says nothing about the ear.
+            # Worn buds advertise only every 10-20 s; 3 s after one the state manager clears the
+            # ear flags and marks them not fresh (uncertain, not removed). Hold the last fresh
+            # reading like the battery, and only while it is fresh.
+            in_ear = (bool(getattr(pod,"in_ear",False)) if candidate is not None and current.in_ear_fresh
+                      else previous.get("inEar", False))
             rows.append(dict(label=label,value=value,charging=bool(pod and pod.battery.charging and age<=10),
                              quality="unknown" if value<0 else "fresh" if age<=10 else "cached",
-                             inEar=bool(pod is not None and getattr(pod,"in_ear",False) and current.in_ear_fresh and age<=10)))
+                             inEar=bool(in_ear and age<=10)))
         if rows != self._batteries:
             self._batteries = rows; self.batteriesChanged.emit()
 

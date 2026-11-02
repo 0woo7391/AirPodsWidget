@@ -97,3 +97,52 @@ def test_stale_reading_is_not_a_removal(tmp_path, monkeypatch):
     assert dock._ear == (True, True)
     dock._confirm_pause(dock._ear_generation)
     assert media.commands == []
+
+
+def test_auto_battery_source_takes_nearby_airpods_of_one_model_while_connected():
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "prototypes" / "glass_audio_widget"))
+    from types import SimpleNamespace
+    from device_backend import DeviceBackend
+
+    backend = SimpleNamespace(auto_sources=True, AUTO_RSSI=DeviceBackend.AUTO_RSSI, _auto_model=None,
+                              _state=dict(connected=True))
+    accept = lambda rssi, model: DeviceBackend._auto_accept(backend, SimpleNamespace(rssi=rssi, model_id=model))
+    assert not accept(-80, 0x2027)           # too far to be the user's own
+    assert accept(-55, 0x2027)
+    assert not accept(-50, 0x2014)           # another model nearby is ignored
+    backend._state["connected"] = False
+    assert not accept(-50, 0x2027)           # not connected: never guess
+    backend.auto_sources = False
+    backend._state["connected"] = True
+    assert not accept(-50, 0x2027)           # opt-in only (glass widget keeps manual sources)
+
+
+def test_in_ear_holds_through_the_gap_between_advertisements(tmp_path):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "prototypes" / "glass_audio_widget"))
+    from types import SimpleNamespace
+    from device_backend import DeviceBackend
+
+    class Scanner(QObject):
+        advertisementReceived = Signal(object)
+        errorOccurred = Signal(str)
+
+    now = [0.0]
+    backend = DeviceBackend(scanner=Scanner(), settings=QSettings(str(tmp_path / "d.ini"), QSettings.IniFormat),
+                            start=False, clock=lambda: now[0])
+
+    def state(in_ear, fresh):
+        pod = lambda: SimpleNamespace(in_ear=in_ear, battery=SimpleNamespace(percent=60, charging=False))
+        case = SimpleNamespace(battery=SimpleNamespace(percent=None, charging=False))
+        return SimpleNamespace(current=SimpleNamespace(left=pod(), right=pod(), case=case, in_ear_fresh=fresh))
+
+    backend._valid_at = {"left": 0.0, "right": 0.0}
+    backend._manager = state(True, True)
+    backend.refresh()
+    assert [b["inEar"] for b in backend.batteries[:2]] == [True, True]
+    now[0] = 4.0   # the state manager has cleared the flags as uncertain
+    backend._manager = state(False, False)
+    backend.refresh()
+    assert [b["inEar"] for b in backend.batteries[:2]] == [True, True]
+    now[0] = 11.0  # no fresh reading any more: unknown, and marked cached
+    backend.refresh()
+    assert [(b["inEar"], b["quality"]) for b in backend.batteries[:2]] == [(False, "cached")] * 2
