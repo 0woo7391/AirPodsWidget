@@ -16,9 +16,9 @@ import sys
 import tempfile
 from pathlib import Path
 
-from PySide6.QtCore import (Property, QObject, QPoint, QRect, QSettings, QStandardPaths, QTimer, QUrl, Qt,
+from PySide6.QtCore import (Property, QObject, QPoint, QRect, QSettings, QSize, QStandardPaths, QTimer, QUrl, Qt,
                             Signal, Slot)
-from PySide6.QtGui import QAction, QActionGroup, QColor, QCursor, QFontDatabase, QGuiApplication, QIcon, QRegion
+from PySide6.QtGui import QAction, QColor, QFontDatabase, QGuiApplication, QIcon, QRegion
 from PySide6.QtQuick import QQuickView
 from PySide6.QtQuickControls2 import QQuickStyle
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
@@ -36,6 +36,7 @@ from preview import LucianProvider  # noqa: E402
 from launcher import AppIconProvider, LauncherBackend  # noqa: E402
 from optical import IconMetrics  # noqa: E402
 from features import DockFeatures  # noqa: E402
+from prefs import DockPrefs, screens_in_order  # noqa: E402
 
 WINDOW_WIDTH = 340
 EDGE_MARGIN = 12
@@ -46,42 +47,28 @@ def dock_settings() -> QSettings:
     return QSettings(str(folder / "dock.ini"), QSettings.IniFormat)
 
 
-def pref(settings: QSettings, key: str, default):
-    return settings.value(key, default, type=type(default))
-
-
-def screen_label(screen, index: int) -> str:
-    size = screen.size()
-    primary = " · 주 화면" if screen is QGuiApplication.primaryScreen() else ""
-    return f"화면 {index + 1} ({size.width()}×{size.height()}){primary}"
-
-
-def island_screens(choice: str) -> list:
-    """Screens an island shows on: primary, secondary, all, or the one under the cursor."""
-    primary = QGuiApplication.primaryScreen()
-    screens = QGuiApplication.screens()
-    if choice == "all":
-        return list(screens)
-    if choice == "secondary":
-        others = [s for s in screens if s is not primary]
-        return others[:1] or [primary]
-    if choice == "cursor":
-        return [QGuiApplication.screenAt(QCursor.pos()) or primary]
-    return [primary]
+def load_fonts() -> str:
+    """Pretendard static weights, as in the main app; the variable SUIT build renders too light."""
+    family = ""
+    for weight in ("Regular", "Medium", "SemiBold"):
+        font_id = QFontDatabase.addApplicationFont(str(PROJECT / "assets" / "fonts" / f"Pretendard-{weight}.otf"))
+        if font_id >= 0 and not family:
+            family = QFontDatabase.applicationFontFamilies(font_id)[0]
+    return family
 
 
 class DockView(QQuickView):
     alwaysOnTopChanged = Signal()
     minimizedChanged = Signal()
+    edgeChanged = Signal()
     nativeGlassChanged = Signal()
 
-    def __init__(self, audio, media, devices, launcher, features, settings: QSettings, *, always_on_top=False,
+    def __init__(self, audio, media, devices, launcher, features, prefs: DockPrefs, *, always_on_top=False,
                  preview_backdrop=False):
         super().__init__()
         self.setTitle("Glass Dock")
-        self.settings = settings
-        self._always_on_top = always_on_top or pref(settings, "dock/alwaysOnTop", False)
-        self._minimized = pref(settings, "dock/minimized", False) and not preview_backdrop
+        self.prefs = prefs
+        self._force_on_top = always_on_top
         self._native_glass = False
         self._masking = not preview_backdrop
         self.setFlags(self._flags())
@@ -91,12 +78,6 @@ class DockView(QQuickView):
         self.setColor(QColor(Qt.transparent))
         self.setResizeMode(QQuickView.SizeRootObjectToView)
 
-        # Pretendard static weights, as in the main app; the variable SUIT build renders too light.
-        family = ""
-        for weight in ("Regular", "Medium", "SemiBold"):
-            font_id = QFontDatabase.addApplicationFont(str(PROJECT / "assets" / "fonts" / f"Pretendard-{weight}.otf"))
-            if font_id >= 0 and not family:
-                family = QFontDatabase.applicationFontFamilies(font_id)[0]
         self.icons = LucianProvider()
         self.metrics = IconMetrics(self.icons, self)
         self.engine().addImageProvider("lucian", self.icons)
@@ -104,8 +85,9 @@ class DockView(QQuickView):
         self.qml_warnings: list[str] = []
         self.engine().warnings.connect(lambda issues: self.qml_warnings.extend(i.toString() for i in issues))
         context = self.rootContext()
-        context.setContextProperty("dockFont", family)
+        context.setContextProperty("dockFont", load_fonts())
         context.setContextProperty("dockHost", self)
+        context.setContextProperty("dockPrefs", prefs)
         context.setContextProperty("iconMetrics", self.metrics)
         context.setContextProperty("outputBackend", audio)
         context.setContextProperty("mediaBackend", media)
@@ -116,66 +98,64 @@ class DockView(QQuickView):
         self.setSource(QUrl.fromLocalFile(str(BASE / "qml" / "GlassDock.qml")))
         if self.status() == QQuickView.Error:
             raise RuntimeError("\n".join(e.toString() for e in self.errors()))
-        self.placeOnRightEdge()
+        prefs.changed.connect(self._on_pref)
+        prefs.screensChanged.connect(lambda: QTimer.singleShot(0, self.place))
+        self.place()
 
     def _flags(self):
         flags = Qt.Tool | Qt.FramelessWindowHint | Qt.NoDropShadowWindowHint
-        return flags | (Qt.WindowStaysOnTopHint if self._always_on_top else Qt.WindowStaysOnBottomHint)
+        return flags | (Qt.WindowStaysOnTopHint if self.alwaysOnTop else Qt.WindowStaysOnBottomHint)
 
-    def targetScreen(self):
-        name = pref(self.settings, "dock/screen", "primary")
-        for screen in QGuiApplication.screens():
-            if screen.name() == name:
-                return screen
-        return QGuiApplication.primaryScreen()
+    def _on_pref(self, key):
+        if key == "dock/alwaysOnTop":
+            visible = self.isVisible()
+            self.setFlags(self._flags())
+            if visible:
+                self.show()
+            self.alwaysOnTopChanged.emit()
+        elif key == "dock/minimized":
+            self.minimizedChanged.emit()
+        elif key in ("dock/screen", "dock/edge"):
+            self.edgeChanged.emit()
+            self.place()
 
     @Slot()
-    def placeOnRightEdge(self):
-        """Full height on the right edge of the chosen screen; follows taskbar and resolution changes."""
-        screen = self.targetScreen()
+    def place(self):
+        """Full height on the chosen edge of the chosen screen; follows taskbar and resolution changes."""
+        screen = self.prefs.dock_screen()
         if self.screen() is not screen:
             self.setScreen(screen)
         area = screen.availableGeometry()
         self.resize(WINDOW_WIDTH, area.height())
-        self.setPosition(QPoint(area.right() - WINDOW_WIDTH + 1, area.top()))
+        x = area.left() if self.edge == "left" else area.right() - WINDOW_WIDTH + 1
+        self.setPosition(QPoint(x, area.top()))
 
     def followScreens(self, app: QGuiApplication):
         def watch(screen):
-            screen.availableGeometryChanged.connect(self.placeOnRightEdge)
+            screen.availableGeometryChanged.connect(self.place)
         for screen in app.screens():
             watch(screen)
         app.screenAdded.connect(watch)
-        app.screenAdded.connect(self.placeOnRightEdge)
-        app.screenRemoved.connect(lambda _screen: QTimer.singleShot(0, self.placeOnRightEdge))
-        app.primaryScreenChanged.connect(self.placeOnRightEdge)
 
     @Property(bool, notify=alwaysOnTopChanged)
     def alwaysOnTop(self):
-        return self._always_on_top
+        return self._force_on_top or self.prefs.get("dock/alwaysOnTop")
 
     @Slot(bool)
     def setAlwaysOnTop(self, value):
-        if value == self._always_on_top:
-            return
-        self._always_on_top = value
-        self.settings.setValue("dock/alwaysOnTop", value)
-        visible = self.isVisible()
-        self.setFlags(self._flags())
-        if visible:
-            self.show()
-        self.alwaysOnTopChanged.emit()
+        self.prefs.set("dock/alwaysOnTop", value)
 
     @Property(bool, notify=minimizedChanged)
     def minimized(self):
-        return self._minimized
+        return self.prefs.get("dock/minimized")
 
     @Slot(bool)
     def setMinimized(self, value):
-        if value == self._minimized:
-            return
-        self._minimized = value
-        self.settings.setValue("dock/minimized", value)
-        self.minimizedChanged.emit()
+        self.prefs.set("dock/minimized", value)
+
+    @Property(str, notify=edgeChanged)
+    def edge(self):
+        return self.prefs.get("dock/edge")
 
     @Property(bool, notify=nativeGlassChanged)
     def nativeGlass(self):
@@ -207,193 +187,169 @@ class DockView(QQuickView):
         self.setMask(region)
 
 
-class IslandView(QQuickView):
-    """One island window on one screen: above everything, never taking input."""
+def overlay_window(dock: DockView, qml: str) -> QQuickView:
+    """A frameless, transparent, topmost window on the dock's QML engine that never takes input."""
+    view = QQuickView(dock.engine(), None)  # shares fonts, icon providers and context properties
+    view.setFlags(Qt.Tool | Qt.FramelessWindowHint | Qt.NoDropShadowWindowHint | Qt.WindowStaysOnTopHint
+                  | Qt.WindowTransparentForInput)
+    surface = view.format()
+    surface.setAlphaBufferSize(8)
+    view.setFormat(surface)
+    view.setColor(QColor(Qt.transparent))
+    view.setSource(QUrl.fromLocalFile(str(BASE / "qml" / qml)))
+    if view.status() == QQuickView.Error:
+        raise RuntimeError("\n".join(e.toString() for e in view.errors()))
+    return view
+
+
+class IslandView:
+    """One island window on one screen."""
 
     def __init__(self, dock: DockView):
-        super().__init__(dock.engine(), None)  # shares fonts, icon providers and context properties
-        self.setTitle("Glass Dock Island")
-        self.setFlags(Qt.Tool | Qt.FramelessWindowHint | Qt.NoDropShadowWindowHint
-                      | Qt.WindowStaysOnTopHint | Qt.WindowTransparentForInput)
-        surface = self.format()
-        surface.setAlphaBufferSize(8)
-        self.setFormat(surface)
-        self.setColor(QColor(Qt.transparent))
-        self.setSource(QUrl.fromLocalFile(str(BASE / "qml" / "Island.qml")))
-        if self.status() == QQuickView.Error:
-            raise RuntimeError("\n".join(e.toString() for e in self.errors()))
-        self.rootObject().finished.connect(self.hide)
+        self.view = overlay_window(dock, "Island.qml")
+        self.view.setTitle("Glass Dock Island")
+        self.view.rootObject().finished.connect(self.view.hide)
 
     def place(self, screen, align: str, offset: int):
-        if self.screen() is not screen:
-            self.setScreen(screen)
+        view = self.view
+        if view.screen() is not screen:
+            view.setScreen(screen)
         area = screen.availableGeometry()
         if align == "left":
             x = area.left() + 16
         elif align == "right":
-            x = area.right() + 1 - self.width() - 16
+            x = area.right() + 1 - view.width() - 16
         else:
-            x = area.center().x() - self.width() // 2
-        self.setPosition(QPoint(x, area.top() + offset))
+            x = area.center().x() - view.width() // 2
+        view.setPosition(QPoint(x, area.top() + offset))
 
     def notify(self, title, subtitle, tone, batteries):
-        self.show()
-        self.rootObject().show(title, subtitle, tone, batteries)
+        self.view.show()
+        self.view.rootObject().show(title, subtitle, tone, batteries)
 
 
 class IslandHub(QObject):
     """Shows an island on the screens the settings choose, one window per screen."""
 
-    def __init__(self, dock: DockView, settings: QSettings):
+    def __init__(self, dock: DockView, prefs: DockPrefs):
         super().__init__(dock)
         self.dock = dock
-        self.settings = settings
+        self.prefs = prefs
         self.views: dict = {}
         QGuiApplication.instance().screenRemoved.connect(self._drop)
 
     def _drop(self, screen):
-        view = self.views.pop(screen, None)
-        if view is not None:
+        island = self.views.pop(screen, None)
+        if island is not None:
+            island.view.hide()
+            island.view.setSource(QUrl())
+            island.view.deleteLater()
+
+    def notify(self, title, subtitle, tone, batteries=None):
+        align = self.prefs.get("island/align")
+        offset = self.prefs.get("island/offset")
+        for screen in self.prefs.island_screens():
+            island = self.views.get(screen)
+            if island is None:
+                island = self.views[screen] = IslandView(self.dock)
+            island.place(screen, align, offset)
+            island.notify(title, subtitle, tone, batteries or [])
+
+    def close(self):
+        for island in self.views.values():
+            island.view.setSource(QUrl())
+
+
+class DockActions(QObject):
+    """What the settings window can ask for besides changing a value."""
+
+    def __init__(self, dock: DockView, hub: IslandHub, features: DockFeatures, devices, app: QApplication):
+        super().__init__(dock)
+        self.dock, self.hub, self.features, self.devices, self.app = dock, hub, features, devices, app
+        self._identify: list[QQuickView] = []
+
+    @Slot()
+    def identifyScreens(self):
+        """A big number on every screen for three seconds, matching the map in the settings."""
+        for view in self._identify:
             view.hide()
             view.setSource(QUrl())
             view.deleteLater()
+        self._identify = []
+        for info, screen in zip(self.dock.prefs.screens, screens_in_order()):
+            view = overlay_window(self.dock, "Identify.qml")
+            view.setScreen(screen)
+            root = view.rootObject()
+            root.setProperty("number", info["number"])
+            root.setProperty("label", info["model"] + (" · 주 화면" if info["primary"] else ""))
+            area = screen.geometry()
+            view.setPosition(QPoint(area.center().x() - view.width() // 2, area.center().y() - view.height() // 2))
+            view.show()
+            self._identify.append(view)
+        QTimer.singleShot(3000, lambda: [view.hide() for view in self._identify])
 
-    def notify(self, title, subtitle, tone, batteries=None):
-        align = pref(self.settings, "island/align", "center")
-        offset = pref(self.settings, "island/offset", 0)
-        for screen in island_screens(pref(self.settings, "island/screens", "primary")):
-            view = self.views.get(screen)
-            if view is None:
-                view = self.views[screen] = IslandView(self.dock)
-            view.place(screen, align, offset)
-            view.notify(title, subtitle, tone, batteries or [])
+    @Slot()
+    def previewIsland(self):
+        self.hub.notify(self.devices.state.get("name") or "AirPods", "연결됨", "connected",
+                        list(self.devices.batteries))
 
-    def close(self):
-        for view in self.views.values():
-            view.setSource(QUrl())
+    @Slot()
+    def playAlert(self):
+        self.features.play_alert()
+
+    @Slot()
+    def quit(self):
+        self.app.quit()
 
 
-def make_tray(view: DockView, hub: IslandHub, features: DockFeatures, settings: QSettings, devices,
+class SettingsView(QQuickView):
+    """The settings window: an ordinary window in the taskbar, built on the dock's engine."""
+
+    def __init__(self, dock: DockView, actions: DockActions):
+        super().__init__(dock.engine(), None)
+        self.setTitle("Glass Dock 설정")
+        self.setIcon(QIcon(str(PROJECT / "assets" / "app.ico")))
+        self.setColor(QColor("#141418"))
+        self.setResizeMode(QQuickView.SizeRootObjectToView)
+        self.rootContext().setContextProperty("dockActions", actions)
+        self.setSource(QUrl.fromLocalFile(str(BASE / "qml" / "Settings.qml")))
+        if self.status() == QQuickView.Error:
+            raise RuntimeError("\n".join(e.toString() for e in self.errors()))
+        self.resize(860, 640)
+        self.setMinimumSize(QSize(760, 540))
+
+    def open(self, page: str = ""):
+        if page:
+            self.rootObject().setProperty("page", page)
+        if not self.isVisible():
+            area = QGuiApplication.primaryScreen().availableGeometry()
+            self.setPosition(area.center().x() - self.width() // 2, area.center().y() - self.height() // 2)
+        self.show()
+        self.raise_()
+        self.requestActivate()
+
+
+def make_tray(view: DockView, settings_view: SettingsView, actions: DockActions, prefs: DockPrefs,
               app: QApplication) -> QSystemTrayIcon:
+    """Left click opens the settings; the menu keeps only the quick switches."""
     tray = QSystemTrayIcon(QIcon(str(PROJECT / "assets" / "app.ico")), app)
     tray.setToolTip("Glass Dock")
     menu = QMenu()
-
-    on_top = QAction("항상 위에 표시", menu, checkable=True)
-    on_top.setChecked(view.alwaysOnTop)
-    on_top.toggled.connect(view.setAlwaysOnTop)
-    menu.addAction(on_top)
-    minimized = QAction("최소화 (레일)", menu, checkable=True)
-    minimized.setChecked(view.minimized)
-    minimized.toggled.connect(view.setMinimized)
-    menu.addAction(minimized)
-
-    def choices(parent: QMenu, title: str, key: str, default, options, changed=None):
-        sub = parent.addMenu(title)
-
-        def fill():
-            sub.clear()
-            group = QActionGroup(sub)
-            current = pref(settings, key, default)
-            for value, label in (options() if callable(options) else options):
-                action = sub.addAction(label)
-                action.setCheckable(True)
-                action.setChecked(value == current)
-                group.addAction(action)
-                action.triggered.connect(lambda _=False, v=value: (settings.setValue(key, v), changed and changed()))
-
-        sub.aboutToShow.connect(fill)  # screens come and go, so the list is built on open
-        fill()
-        return sub
-
-    def screen_options():
-        return [("primary", "주 화면")] + [(s.name(), screen_label(s, i)) for i, s in enumerate(QGuiApplication.screens())]
-
-    choices(menu, "Dock 화면", "dock/screen", "primary", screen_options, view.placeOnRightEdge)
-
-    if hasattr(devices, "selectDevice"):
-        target = menu.addMenu("AirPods 기기")
-
-        def fill_devices():
-            target.clear()
-            group = QActionGroup(target)
-            current = devices.state.get("targetId", "")
-            for device in devices.devices:
-                action = target.addAction(device.get("name") or device.get("id"))
-                action.setCheckable(True)
-                action.setChecked(device.get("id") == current)
-                group.addAction(action)
-                action.triggered.connect(lambda _=False, key=device.get("id"): devices.selectDevice(key))
-            if not devices.devices:
-                target.addAction("페어링된 기기 없음").setEnabled(False)
-
-        target.aboutToShow.connect(fill_devices)
-        fill_devices()
-
-        # Battery advertisements nearby; at most two of the same model can be bound (glass widget rule).
-        sources = menu.addMenu("배터리 출처")
-
-        def fill_sources():
-            sources.clear()
-            bound = list(devices.batterySources)
-            for item in devices.candidates:
-                address = item.get("address")
-                action = sources.addAction(f"{item.get('name') or '?'} · {address}")
-                action.setCheckable(True)
-                action.setChecked(address in bound)
-
-                def toggle(checked, address=address):
-                    chosen = [a for a in devices.batterySources if a != address] + ([address] if checked else [])
-                    devices.bindSources(chosen)
-                action.toggled.connect(toggle)
-            if not devices.candidates:
-                sources.addAction("케이스를 열고 잠시 기다리세요").setEnabled(False)
-            sources.addSeparator()
-            sources.addAction("초기화").triggered.connect(lambda: devices.bindSources([]))
-
-        sources.aboutToShow.connect(fill_sources)
-        fill_sources()
-
-    island = menu.addMenu("아일랜드 알림")
-    choices(island, "표시 화면", "island/screens", "primary",
-            [("primary", "주 화면"), ("secondary", "보조 화면"), ("all", "모든 화면"), ("cursor", "마우스가 있는 화면")])
-    choices(island, "위치", "island/align", "center", [("center", "가운데"), ("left", "왼쪽"), ("right", "오른쪽")])
-    choices(island, "위쪽 여백", "island/offset", 0, [(0, "0 px"), (8, "8 px"), (16, "16 px"), (32, "32 px")])
-    island.addSeparator()
-    def toggle(parent: QMenu, key: str, label: str):
-        action = QAction(label, parent, checkable=True)
-        action.setChecked(features.get(key))
-        action.toggled.connect(lambda value: features.set(key, value))
-        parent.addAction(action)
-
-    for key, label in (("island/connect", "연결"), ("island/disconnect", "연결 해제"),
-                       ("island/lowBattery", "배터리 부족"), ("island/suppressDuringGames", "게임 중 숨기기")):
-        toggle(island, key, label)
-    island.addSeparator()
-    preview = island.addAction("미리 보기")
-    preview.triggered.connect(lambda: hub.notify(devices.state.get("name") or "AirPods", "연결됨", "connected",
-                                                 list(devices.batteries)))
-
-    battery = menu.addMenu("배터리 경고")
-    choices(battery, "기준", "battery/threshold", 20, [(10, "10%"), (15, "15%"), (20, "20%"), (30, "30%")])
-    toggle(battery, "battery/sound", "경고음")
-    choices(battery, "경고음 크기", "battery/soundVolume", 60, [(30, "30%"), (60, "60%"), (100, "100%")])
-    toggle(battery, "battery/soundDuringGames", "게임 중에도 경고음")
-    battery.addAction("경고음 미리 듣기").triggered.connect(features.play_alert)
-
-    media = menu.addMenu("미디어")
-    toggle(media, "media/followAny", "재생 중인 아무 앱이나 따라가기")
-    media.addSeparator()
-    toggle(media, "media/autoPause", "귀에서 빼면 일시정지")
-    toggle(media, "media/autoResume", "다시 끼면 재생")
-
-    toggle(menu, "system/startWithWindows", "Windows 시작 시 실행")
-
+    menu.addAction("설정 열기").triggered.connect(lambda: settings_view.open())
     menu.addSeparator()
-    quit_action = QAction("종료", menu)
-    quit_action.triggered.connect(app.quit)
-    menu.addAction(quit_action)
+    switches = []
+    for key, label in (("dock/minimized", "레일로 최소화"), ("dock/alwaysOnTop", "항상 위에 표시")):
+        action = QAction(label, menu, checkable=True)
+        action.setChecked(prefs.get(key))
+        action.toggled.connect(lambda value, k=key: prefs.set(k, value))
+        menu.addAction(action)
+        switches.append((key, action))
+    prefs.changed.connect(lambda key: [a.setChecked(prefs.get(k)) for k, a in switches if k == key])
+    menu.addAction("아일랜드 미리 보기").triggered.connect(actions.previewIsland)
+    menu.addSeparator()
+    menu.addAction("종료").triggered.connect(app.quit)
     tray.setContextMenu(menu)
+    tray.activated.connect(lambda reason: settings_view.open() if reason == QSystemTrayIcon.Trigger else None)
     tray._menu = menu  # keep the menu alive with the tray
     tray.show()
     return tray
@@ -421,34 +377,53 @@ def real_backends():
             DeviceBackend(settings=ini("devices.ini"), auto_sources=True), LauncherBackend())
 
 
-def capture(view: DockView, hub: IslandHub, devices, app: QApplication, folder: Path) -> int:
-    """Render dock states (bento, rail, magnified, details) and island moments to PNGs."""
+def capture(view: DockView, hub: IslandHub, settings_view: SettingsView, prefs: DockPrefs, devices,
+            app: QApplication, folder: Path) -> int:
+    """Render dock states, settings pages and island moments to PNGs for review."""
     folder.mkdir(parents=True, exist_ok=True)
     root = view.rootObject()
-    # (file name, forcedCard, minimized, forcedPointerY, forcedRailOpen)
-    states = [("summary", "", False, -1, -1), ("magnify-media", "", False, 330, -1),
-              ("airpods", "airpods", False, -1, -1), ("media", "media", False, -1, -1),
-              ("volume", "volume", False, -1, -1), ("output", "output", False, -1, -1),
-              ("rail", "", True, -1, 0), ("rail-open", "", True, 300, 1), ("rail-airpods", "airpods", True, -1, 0)]
+    # (file name, forcedCard, minimized, forcedPointerY, forcedRailOpen, edge)
+    states = [("summary", "", False, -1, -1, "right"), ("magnify-media", "", False, 330, -1, "right"),
+              ("airpods", "airpods", False, -1, -1, "right"), ("media", "media", False, -1, -1, "right"),
+              ("volume", "volume", False, -1, -1, "right"), ("output", "output", False, -1, -1, "right"),
+              ("rail", "", True, -1, 0, "right"), ("rail-open", "", True, 300, 1, "right"),
+              ("rail-airpods", "airpods", True, -1, 0, "right"),
+              ("left-summary", "", False, -1, -1, "left"), ("left-media", "media", False, -1, -1, "left"),
+              ("left-rail-open", "", True, 300, 1, "left")]
+    pages = ["screen", "modules", "island", "airpods", "media", "general"]
     moments = [0.05, 0.3, 1.5, 3.5]
     tones = [("connected", "연결됨"), ("low", "배터리 부족 · 왼쪽 15%"), ("disconnected", "연결 해제됨")]
     shots = [(tone, sub, m) for tone, sub in tones for m in moments]
     hub.notify("AirPods Pro", "연결됨", "connected", list(devices.batteries))
-    island = next(iter(hub.views.values()))
+    island = next(iter(hub.views.values())).view
     island_root = island.rootObject()
 
     def step(index=0):
         if index:
             view.grabWindow().save(str(folder / f"dock-{states[index - 1][0]}.png"))
         if index == len(states):
-            QTimer.singleShot(300, island_step)
+            prefs.set("dock/edge", "right")
+            settings_view.show()
+            QTimer.singleShot(400, page_step)
             return
-        _, card, rail, pointer_y, rail_open = states[index]
+        _, card, rail, pointer_y, rail_open, edge = states[index]
+        prefs.set("dock/edge", edge)
+        view.resize(WINDOW_WIDTH + 40, 760)
         view.setMinimized(rail)
         root.setProperty("forcedCard", card)
         root.setProperty("forcedPointerY", pointer_y)
         root.setProperty("forcedRailOpen", rail_open)
         QTimer.singleShot(900, lambda: step(index + 1))
+
+    def page_step(index=0):
+        if index:
+            settings_view.grabWindow().save(str(folder / f"settings-{pages[index - 1]}.png"))
+        if index == len(pages):
+            settings_view.hide()
+            QTimer.singleShot(300, island_step)
+            return
+        settings_view.rootObject().setProperty("page", pages[index])
+        QTimer.singleShot(400, lambda: page_step(index + 1))
 
     def island_step(index=0):
         if index:
@@ -482,21 +457,24 @@ def main() -> int:
     audio, media, devices, launcher = demo_backends() if demo else real_backends()
     previewing = args.capture is not None
     # Previews must not read or change the user's dock settings.
-    settings = QSettings(str(Path(tempfile.mkdtemp(prefix="glass-dock-capture-")) / "dock.ini"),
-                         QSettings.IniFormat) if previewing else dock_settings()
+    prefs = DockPrefs(QSettings(str(Path(tempfile.mkdtemp(prefix="glass-dock-capture-")) / "dock.ini"),
+                                QSettings.IniFormat) if previewing else dock_settings())
     # Sample data must not count towards the real in-ear time.
     usage_path = Path(tempfile.mkdtemp(prefix="glass-dock-usage-")) / "usage.json" if demo else None
-    features = DockFeatures(devices, media, settings, PROJECT / "assets" / "low_power_warning.mp3",
+    features = DockFeatures(devices, media, prefs, PROJECT / "assets" / "low_power_warning.mp3",
                             usage_path=usage_path)
-    view = DockView(audio, media, devices, launcher, features, settings, always_on_top=args.on_top,
+    view = DockView(audio, media, devices, launcher, features, prefs, always_on_top=args.on_top,
                     preview_backdrop=previewing)
-    hub = IslandHub(view, settings)
+    hub = IslandHub(view, prefs)
     features.notice.connect(hub.notify)
+    actions = DockActions(view, hub, features, devices, app)
+    settings_view = SettingsView(view, actions)
     if previewing:
         view.resize(WINDOW_WIDTH + 40, 760)
         view.show()
-        code = capture(view, hub, devices, app, args.capture)
+        code = capture(view, hub, settings_view, prefs, devices, app, args.capture)
         hub.close()
+        settings_view.setSource(QUrl())
         view.setSource(QUrl())  # release QML before the backends go away
         if view.qml_warnings:
             print("\n".join(view.qml_warnings), file=sys.stderr)
@@ -510,7 +488,7 @@ def main() -> int:
     if demo:
         from demo_backends import demo_events
         demo_timer = demo_events(devices)  # noqa: F841 - kept alive for the app's lifetime
-    tray = make_tray(view, hub, features, settings, devices, app)
+    tray = make_tray(view, settings_view, actions, prefs, app)
     for owner in (audio, media, devices):
         if hasattr(owner, "stop"):
             app.aboutToQuit.connect(owner.stop)
@@ -518,6 +496,7 @@ def main() -> int:
     app.aboutToQuit.connect(features.save)
     code = app.exec()
     hub.close()
+    settings_view.setSource(QUrl())
     view.setSource(QUrl())
     return code
 

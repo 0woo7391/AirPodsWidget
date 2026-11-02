@@ -1,10 +1,11 @@
 import QtQuick
 
-// The dock column on the right edge of the window. The window is wider than
-// the column so a hovered card has room to grow left; dockHost masks input to
-// the column (and a grown card), so the rest passes clicks to the desktop.
+// The dock column on the chosen edge of the window. The window is wider than
+// the column so a hovered card has room to grow inward; dockHost masks input
+// to the column (and a grown card), so the rest passes clicks to the desktop.
 // Two layouts: bento cards, or a minimized rail of icons (dockHost.minimized)
-// that widens into labels on hover. Cards morph between the two.
+// that widens into labels on hover. Cards morph between the two. Which modules
+// show, and in what order, comes from dockPrefs.modules.
 Item {
     id: dock
     width: 340
@@ -14,9 +15,12 @@ Item {
     property string forcedCard: ""
     property real forcedPointerY: -1
     property real forcedRailOpen: -1
+    readonly property bool mirrored: dockHost.edge === "left"
+    readonly property var cardsById: ({ airpods: airpods, media: media, volume: volume, output: output, launcher: launcher })
     readonly property var cards: [airpods, media, volume, output, launcher]
+    readonly property var order: dockPrefs.modules.filter(m => m.visible).map(m => m.id)
     readonly property string activeCard: {
-        for (const card of cards) if (card.expanded) return card.cardId
+        for (const card of cards) if (card.visible && card.expanded) return card.cardId
         return ""
     }
 
@@ -39,10 +43,11 @@ Item {
         const w = morphing ? Theme.dockWidth : widest
         const top = morphing ? 0 : column.y
         const h = morphing ? height : column.height
+        const left = mirrored ? column.x : column.x + column.width - w
         // Outset so magnified cells and antialiased rims are never clipped.
-        const rects = [[column.x + column.width - w - 10, top - 6, w + 20, h + 12]]
+        const rects = [[left - 10, top - 6, w + 20, h + 12]]
         for (const card of cards) {
-            const r = card.maskRect()
+            const r = card.visible ? card.maskRect() : null
             if (r) rects.push(r)
         }
         dockHost.updateMask(rects)
@@ -51,6 +56,8 @@ Item {
     Component.onCompleted: scheduleMask()
     onWidthChanged: scheduleMask()
     onHeightChanged: scheduleMask()
+    onMirroredChanged: scheduleMask()
+    onOrderChanged: scheduleMask()
     onRailnessChanged: if (railness === 0 || railness === 1 || railness > 0.001 && railness < 0.05) scheduleMask()
     onRailOpenChanged: if (railOpen === 0 || railOpen > 0.99) scheduleMask()
 
@@ -77,57 +84,88 @@ Item {
         readonly property real half: (Theme.dockWidth - gapBento) / 2
         function mix(a, b) { return a + (b - a) * dock.railness }
 
-        // Bento: AirPods, media, volume | output, launcher. Rail: all five stacked.
-        readonly property real bentoY1: airpods.cellHeight + gapBento
-        readonly property real bentoY2: bentoY1 + media.cellHeight + gapBento
-        readonly property real bentoY3: bentoY2 + Math.max(volume.cellHeight, output.cellHeight) + gapBento
-        readonly property real bentoHeight: bentoY3 + launcher.cellHeight
-        readonly property real railY1: airpods.cellHeight + gapRail
-        readonly property real railY2: railY1 + media.cellHeight + gapRail
-        readonly property real railY3: railY2 + volume.cellHeight + gapRail
-        readonly property real railY4: railY3 + output.cellHeight + gapRail
-        readonly property real railHeight: railY4 + launcher.cellHeight
+        // Cell rectangles for both layouts. Bento: modules in order, full width,
+        // except that volume and output share a row when they are next to each other.
+        // Rail: all stacked. Rail x/width follow the widening labels.
+        readonly property var layout: {
+            const halves = ["volume", "output"]
+            const bento = {}, rail = {}
+            let y = 0, r = 0
+            const ids = dock.order
+            for (let i = 0; i < ids.length; i++) {
+                const id = ids[i], card = dock.cardsById[id]
+                const next = ids[i + 1]
+                if (halves.indexOf(id) >= 0 && next && halves.indexOf(next) >= 0) {
+                    const other = dock.cardsById[next]
+                    bento[id] = { x: 0, y: y, w: half }
+                    bento[next] = { x: half + gapBento, y: y, w: half }
+                    y += Math.max(card.cellHeight, other.cellHeight) + gapBento
+                    rail[id] = { y: r }
+                    r += card.cellHeight + gapRail
+                    rail[next] = { y: r }
+                    r += other.cellHeight + gapRail
+                    i++
+                    continue
+                }
+                bento[id] = { x: 0, y: y, w: Theme.dockWidth }
+                y += card.cellHeight + gapBento
+                rail[id] = { y: r }
+                r += card.cellHeight + gapRail
+            }
+            return { bento: bento, rail: rail, bentoHeight: Math.max(0, y - gapBento), railHeight: Math.max(0, r - gapRail) }
+        }
+        function place(id, key) {
+            const b = layout.bento[id], r = layout.rail[id]
+            if (!b) return 0
+            if (key === "y") return mix(b.y, r.y)
+            if (key === "w") return mix(b.w, railW)
+            // On the rail every cell spans the column.
+            return mix(b.x, 0)
+        }
 
         width: mix(Theme.dockWidth, railW)
-        height: mix(bentoHeight, railHeight)
-        anchors.right: parent.right
+        height: mix(layout.bentoHeight, layout.railHeight)
+        anchors.right: dock.mirrored ? undefined : parent.right
+        anchors.left: dock.mirrored ? parent.left : undefined
         anchors.rightMargin: 12
+        anchors.leftMargin: 12
         anchors.verticalCenter: parent.verticalCenter
         onYChanged: if (!(dock.railness > 0 && dock.railness < 1)) dock.scheduleMask()
         onHeightChanged: if (!(dock.railness > 0 && dock.railness < 1)) dock.scheduleMask()
 
         AirPodsCard {
             id: airpods
-            dock: dock; railIndex: 0
-            width: column.width; x: 0; y: 0
+            dock: dock; railIndex: dock.order.indexOf(cardId)
+            visible: railIndex >= 0
+            x: column.place(cardId, "x"); y: column.place(cardId, "y"); width: column.place(cardId, "w")
             dockLeft: column.x + x; dockTop: column.y + y
         }
         MediaCard {
             id: media
-            dock: dock; railIndex: 1
-            width: column.width; x: 0; y: column.mix(column.bentoY1, column.railY1)
+            dock: dock; railIndex: dock.order.indexOf(cardId)
+            visible: railIndex >= 0
+            x: column.place(cardId, "x"); y: column.place(cardId, "y"); width: column.place(cardId, "w")
             dockLeft: column.x + x; dockTop: column.y + y
         }
         VolumeCard {
             id: volume
-            dock: dock; railIndex: 2
-            width: column.mix(column.half, column.railW)
-            x: column.width - width - (column.half + column.gapBento) * (1 - dock.railness)
-            y: column.mix(column.bentoY2, column.railY2)
+            dock: dock; railIndex: dock.order.indexOf(cardId)
+            visible: railIndex >= 0
+            x: column.place(cardId, "x"); y: column.place(cardId, "y"); width: column.place(cardId, "w")
             dockLeft: column.x + x; dockTop: column.y + y
         }
         OutputCard {
             id: output
-            dock: dock; railIndex: 3
-            width: column.mix(column.half, column.railW)
-            x: column.width - width
-            y: column.mix(column.bentoY2, column.railY3)
+            dock: dock; railIndex: dock.order.indexOf(cardId)
+            visible: railIndex >= 0
+            x: column.place(cardId, "x"); y: column.place(cardId, "y"); width: column.place(cardId, "w")
             dockLeft: column.x + x; dockTop: column.y + y
         }
         LauncherCard {
             id: launcher
-            dock: dock; railIndex: 4
-            width: column.width; x: 0; y: column.mix(column.bentoY3, column.railY4)
+            dock: dock; railIndex: dock.order.indexOf(cardId)
+            visible: railIndex >= 0
+            x: column.place(cardId, "x"); y: column.place(cardId, "y"); width: column.place(cardId, "w")
             dockLeft: column.x + x; dockTop: column.y + y
         }
     }

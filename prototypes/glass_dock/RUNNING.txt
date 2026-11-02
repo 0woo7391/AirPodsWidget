@@ -21,14 +21,23 @@ AirPods connect, disconnect, or a bud/case drops to 20% or lower (once until it
 charges or rises above 25%). It never takes clicks. --demo cycles these events
 every 6 s; --capture writes dock-*.png and island-*.png frames.
 
-Tray settings (saved in dock.ini under the app's local data folder): always on
-top, minimized rail, which screen the dock sits on, and for the island: which
-screen(s) (primary, secondary, all, under the cursor), alignment, top margin,
-which events, hiding during games, and a preview. Also: AirPods device and
-battery advertisement sources (real mode), low-battery threshold, warning sound
-(volume, during games, preview), following whatever media plays (default) or
-the glass widget's chosen app, pause when a bud leaves the ear / resume when
-both return, and start with Windows.
+Settings window: left-click the tray icon, or right-click > 설정 열기. Changes
+apply at once and are saved in dock.ini under the app's local data folder.
+  화면    monitor map; which screen and edge (left/right) the dock sits on
+          ("자동" = the outermost monitor on that edge, so the dock is never
+          on the seam between two monitors), identify screens, rail mode,
+          always on top
+  모듈    which cards show and their order (volume and output share a row
+          when next to each other), quick-launch apps (add, remove)
+  알림    island screen(s) on a map (primary, dock's screen, all, under the
+          cursor, or one picked on the map), alignment, top margin, events,
+          hide during games, preview
+  AirPods device, battery reading (automatic or chosen sources), low-battery
+          threshold and warning sound, in-ear time
+  미디어  follow whatever plays, pause/resume on ear removal
+  일반    start with Windows, quit
+The tray menu keeps quick switches: settings, rail, always on top, island
+preview, quit.
 
 The real dock reuses the glass widget's saved AirPods, battery sources, output
 and media choices (%LOCALAPPDATA%\GlassAudioWidget). In-ear time is shared with

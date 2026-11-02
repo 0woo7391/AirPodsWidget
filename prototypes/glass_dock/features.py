@@ -2,13 +2,13 @@
 
 Connect/disconnect/low-battery notices (island + warning sound), pause when a
 bud leaves the ear and resume when both return, in-ear time, game-aware
-suppression and start with Windows. Settings live in the dock's dock.ini.
+suppression and start with Windows. Settings come from DockPrefs (prefs.py).
 """
 from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Property, QObject, QSettings, QTimer, Signal, Slot
+from PySide6.QtCore import Property, QObject, QTimer, Signal, Slot
 
 from services.game_detector import is_game_foreground
 from services.startup_manager import set_start_with_windows
@@ -19,23 +19,17 @@ GAME_PROCESSES = ["League of Legends.exe", "LeagueClient.exe", "LeagueClientUx.e
                   "VALORANT-Win64-Shipping.exe"]
 ESTIMATED_MAX_LISTENING_MINUTES = 8 * 60
 PART_NAMES = {"L": "왼쪽", "R": "오른쪽", "CASE": "케이스", "C": "케이스"}
-DEFAULTS = {
-    "island/connect": True, "island/disconnect": True, "island/lowBattery": True,
-    "island/suppressDuringGames": True,
-    "battery/threshold": 20, "battery/sound": True, "battery/soundVolume": 60, "battery/soundDuringGames": True,
-    "media/autoPause": True, "media/autoResume": False, "media/followAny": True,
-    "system/startWithWindows": False,
-}
 
 
 class DockFeatures(QObject):
     notice = Signal(str, str, str, "QVariantList")   # title, subtitle, tone, batteries -> island
     usageChanged = Signal()
 
-    def __init__(self, devices, media, settings: QSettings, sound_file: Path, *, usage_path: Path | None = None,
-                 parent=None):
+    def __init__(self, devices, media, prefs, sound_file: Path, *, usage_path: Path | None = None, parent=None):
         super().__init__(parent)
-        self.devices, self.media, self.settings = devices, media, settings
+        self.devices, self.media, self.prefs = devices, media, prefs
+        self.settings = prefs.settings
+        prefs.changed.connect(self._on_pref)
         self.sound_file = sound_file
         self._alert = None   # created on first use; QtMultimedia is slow to load
         self.usage = UsageTracker(usage_path) if usage_path else UsageTracker()
@@ -55,13 +49,14 @@ class DockFeatures(QObject):
 
     # Settings ---------------------------------------------------------------
     def get(self, key):
-        default = DEFAULTS[key]
-        return self.settings.value(key, default, type=type(default))
+        return self.prefs.get(key)
 
     def set(self, key, value):
-        self.settings.setValue(key, value)
+        self.prefs.set(key, value)
+
+    def _on_pref(self, key):
         if key == "system/startWithWindows":
-            set_start_with_windows(bool(value), app_name="GlassDock")
+            set_start_with_windows(self.get(key), app_name="GlassDock")
         elif key == "media/followAny":
             self._apply_follow_any()
 

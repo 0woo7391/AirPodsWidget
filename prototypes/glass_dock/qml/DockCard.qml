@@ -33,6 +33,12 @@ Item {
     readonly property real railness: dock ? dock.railness : 0
     readonly property real railOpen: dock ? dock.railOpen : 0
     readonly property bool rail: railness > 0.5
+    // Docked on the left edge: panels grow to the right and rail icons sit on the left.
+    readonly property bool mirrored: dock ? dock.mirrored : false
+    function anchoredX(width) {
+        return mirrored ? Math.max(panel.minX, Math.min(0, panel.maxRight - width))
+                        : Math.max(panel.minX, Math.min(card.width - width, panel.maxRight - width))
+    }
     readonly property real cellHeight: summaryHeight + (railHeight - summaryHeight) * railness
 
     property bool open: false
@@ -86,14 +92,14 @@ Item {
     property real magnifyAmount: magnifyTarget
     Behavior on magnifyAmount { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
     readonly property real cellScale: (1 + magnifyAmount) * (1 - (1 - Theme.dimmedScale) * dimAmount)
-    transform: Scale { origin.x: card.width; origin.y: card.cellHeight / 2; xScale: card.cellScale; yScale: card.cellScale }
+    transform: Scale { origin.x: card.mirrored ? 0 : card.width; origin.y: card.cellHeight / 2; xScale: card.cellScale; yScale: card.cellScale }
 
     // Input/visual envelope of the grown panel (with room for its shadow), or null at rest.
     function maskRect() {
         if (!expanded && progress <= 0.001) return null
         const w = detailWidth * 1.04
         const h = detailHeight * 1.04
-        const x = Math.max(panel.minX, Math.min(card.width - w, panel.maxRight - w))
+        const x = anchoredX(w)
         const y = Math.max(panel.minY, Math.min(0, panel.maxBottom - h))
         const p = card.mapToItem(dock, x, y)
         return [p.x - 24, p.y - 16, w + 48, h + 48]
@@ -109,8 +115,8 @@ Item {
 
         width: card.width + (card.detailWidth - card.width) * card.progressW
         height: card.cellHeight + (card.detailHeight - card.cellHeight) * Math.max(0, card.progressH)
-        // Grow leftward from the cell's right edge, then keep inside the window.
-        x: Math.max(minX, Math.min(card.width - width, maxRight - width))
+        // Grow inward from the cell's outer edge, then keep inside the window.
+        x: card.anchoredX(width)
         y: Math.max(minY, Math.min(0, maxBottom - height))
 
         GlassSurface {
@@ -128,20 +134,18 @@ Item {
                 // Pinned to the cell's own footprint so the summary never reflows mid-motion.
                 width: card.width
                 height: card.summaryHeight
-                anchors.right: parent.right
-                anchors.top: parent.top
+                x: card.mirrored ? 0 : parent.width - width
                 sourceComponent: card.summary
                 opacity: (1 - card.railness) * (1 - parent.away)
                 scale: 1 - 0.03 * parent.away
-                transformOrigin: Item.TopRight
+                transformOrigin: card.mirrored ? Item.TopLeft : Item.TopRight
                 visible: opacity > 0
                 enabled: !card.rail && card.progress < 0.1
             }
             Loader {
                 width: card.width
                 height: card.railHeight
-                anchors.right: parent.right
-                anchors.top: parent.top
+                x: card.mirrored ? 0 : parent.width - width
                 active: card.railness > 0
                 sourceComponent: card.railContent ? card.railContent : railRow
                 opacity: card.railness * (1 - parent.away)
@@ -151,8 +155,7 @@ Item {
             Loader {
                 width: card.detailWidth
                 height: card.detailHeight
-                anchors.right: parent.right
-                anchors.top: parent.top
+                x: card.mirrored ? 0 : parent.width - width
                 active: card.expandable
                 sourceComponent: card.detail
                 opacity: Theme.seg(card.progress, 0.15, 0.5)
@@ -180,15 +183,16 @@ Item {
     Component {
         id: railRow
         Item {
+            readonly property real iconCenter: card.mirrored ? Theme.railWidth / 2 : width - Theme.railWidth / 2
             DockIcon {
-                x: parent.width - Theme.railWidth / 2 - size / 2
+                x: parent.iconCenter - size / 2
                 anchors.verticalCenter: parent.verticalCenter
                 size: 18
                 name: card.railIcon
                 pose: card.railPose
             }
             Rectangle {
-                x: parent.width - Theme.railWidth / 2 + 6; y: parent.height / 2 - 11
+                x: parent.iconCenter + 6; y: parent.height / 2 - 11
                 width: 7; height: 7; radius: 3.5
                 color: card.railDot
                 border.width: 1; border.color: "#661B1B21"
@@ -197,7 +201,7 @@ Item {
             // Labels slide in one row after another as the rail widens (#040).
             Column {
                 readonly property real shown: Theme.seg(card.railOpen, 0.1 * card.railIndex, 0.55 + 0.1 * card.railIndex)
-                x: Theme.pad + 6 * (1 - shown)
+                x: (card.mirrored ? Theme.railWidth : Theme.pad) + 6 * (1 - shown)
                 width: parent.width - Theme.railWidth - Theme.pad
                 anchors.verticalCenter: parent.verticalCenter
                 opacity: shown

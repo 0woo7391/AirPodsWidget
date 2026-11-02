@@ -9,6 +9,7 @@ from PySide6.QtCore import QCoreApplication, QObject, QSettings, Signal
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "prototypes" / "glass_dock"))
 import features  # noqa: E402
 from features import DockFeatures  # noqa: E402
+from prefs import DockPrefs  # noqa: E402
 
 _app = QCoreApplication.instance() or QCoreApplication([])
 
@@ -48,7 +49,7 @@ def make(tmp_path, monkeypatch, **values):
     for key, value in values.items():
         settings.setValue(key.replace("_", "/", 1), value)
     devices, media = Devices(), Media()
-    dock = DockFeatures(devices, media, settings, tmp_path / "none.mp3", usage_path=tmp_path / "usage.json")
+    dock = DockFeatures(devices, media, DockPrefs(settings), tmp_path / "none.mp3", usage_path=tmp_path / "usage.json")
     notices = []
     dock.notice.connect(lambda *args: notices.append(args[1:3]))
     monkeypatch.setattr(dock, "play_alert", lambda: notices.append(("sound", "")))
@@ -146,3 +147,15 @@ def test_in_ear_holds_through_the_gap_between_advertisements(tmp_path):
     now[0] = 11.0  # no fresh reading any more: unknown, and marked cached
     backend.refresh()
     assert [(b["inEar"], b["quality"]) for b in backend.batteries[:2]] == [(False, "cached")] * 2
+
+
+def test_module_order_and_visibility(tmp_path):
+    prefs = DockPrefs(QSettings(str(tmp_path / "dock.ini"), QSettings.IniFormat))
+    assert [m["id"] for m in prefs.modules] == ["airpods", "media", "volume", "output", "launcher"]
+    prefs.moveModule("launcher", -10)
+    prefs.setModuleVisible("media", False)
+    assert [(m["id"], m["visible"]) for m in prefs.modules][:3] == [("launcher", True), ("airpods", True),
+                                                                     ("media", False)]
+    for module in ["airpods", "launcher", "volume", "output"]:
+        prefs.setModuleVisible(module, False)
+    assert any(m["visible"] for m in prefs.modules)  # the last visible module cannot be hidden

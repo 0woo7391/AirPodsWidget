@@ -166,7 +166,7 @@ DockCard {
                         id: tileView
                         app: modelData
                         width: 34; height: 34; radius: 10
-                        x: parent.width - Theme.railWidth / 2 - width / 2
+                        x: (card.mirrored ? Theme.railWidth / 2 : parent.width - Theme.railWidth / 2) - width / 2
                         anchors.verticalCenter: parent.verticalCenter
                         magnify: card.dock && card.dock.pointerY >= 0
                             ? Theme.magnifyTile * Theme.magnify(card.dock.pointerY - (card.dockTop + parent.centerY), 60)
@@ -174,7 +174,7 @@ DockCard {
                     }
                     Text {
                         readonly property real shown: Theme.seg(card.railOpen, 0.4 + 0.05 * index, 0.8 + 0.05 * index)
-                        x: Theme.pad + 6 * (1 - shown)
+                        x: (card.mirrored ? Theme.railWidth : Theme.pad) + 6 * (1 - shown)
                         width: parent.width - Theme.railWidth - Theme.pad
                         anchors.verticalCenter: parent.verticalCenter
                         opacity: shown; visible: shown > 0
