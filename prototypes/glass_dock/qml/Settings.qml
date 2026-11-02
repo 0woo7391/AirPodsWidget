@@ -339,6 +339,19 @@ Rectangle {
                     PrefChoice { key: "dock/edge"; options: [{ value: "left", label: "왼쪽" }, { value: "right", label: "오른쪽" }] }
                 }
                 SettingRow {
+                    label: "바탕화면 아이콘 격자에 맞추기"
+                    hint: dockHost.grid && dockHost.grid.cellW
+                        ? "아이콘 한 칸 " + Math.round(dockHost.grid.cellW) + "×" + Math.round(dockHost.grid.cellH) + "px에 맞춰 놓아서, dock 위아래와 옆 칸에 아이콘을 반듯하게 둘 수 있습니다."
+                        : "카드를 바탕화면 아이콘 칸에 맞춥니다."
+                    PrefToggle { key: "dock/grid" }
+                }
+                SettingRow {
+                    visible: root.pref("dock/grid")
+                    label: "폭"
+                    hint: "아이콘 칸 수. 2칸은 좁아서 미디어 앨범 아트를 숨깁니다."
+                    PrefChoice { key: "dock/columns"; options: [{ value: 2, label: "2칸" }, { value: 3, label: "3칸" }] }
+                }
+                SettingRow {
                     label: "세로 위치"
                     hint: "dock 위에 마우스를 올리면 나오는 손잡이를 끌어 위아래로 옮깁니다."
                     GlassButton {
@@ -454,6 +467,14 @@ Rectangle {
                 SettingRow {
                     label: "위치"
                     PrefChoice { key: "island/align"; options: [{ value: "left", label: "왼쪽" }, { value: "center", label: "가운데" }, { value: "right", label: "오른쪽" }] }
+                }
+                SettingRow {
+                    label: "크기"
+                    PrefChoice {
+                        key: "island/scale"
+                        options: [{ value: 0.8, label: "작게" }, { value: 0.9, label: "조금 작게" },
+                                  { value: 1.0, label: "보통" }, { value: 1.15, label: "크게" }]
+                    }
                 }
                 SettingRow {
                     label: "위쪽 여백"

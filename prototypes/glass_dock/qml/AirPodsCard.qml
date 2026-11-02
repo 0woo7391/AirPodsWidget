@@ -45,7 +45,7 @@ DockCard {
                 color: card.device.connected ? Theme.good : card.device.pending ? Theme.warn : Theme.inkTertiary
             }
             Row {
-                x: Theme.pad; y: 42; spacing: 12
+                x: Theme.pad; y: 42; spacing: parent.width < 170 ? 6 : 12
                 Repeater {
                     model: 3
                     Column {

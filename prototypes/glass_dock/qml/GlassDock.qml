@@ -20,6 +20,12 @@ Item {
     property real forcedPointerY: -1
     property real forcedRailOpen: -1
     readonly property bool mirrored: dockHost.edge === "left"
+    // Desktop icon grid (from dockHost): the bento block fills whole icon cells, so desktop
+    // icons line up beside, above and below it. Empty when off or not found.
+    readonly property var grid: dockHost.grid
+    readonly property bool gridOn: !!grid && grid.cellW > 0
+    readonly property real cellH: gridOn ? grid.cellH : 0
+    readonly property real bentoWidth: column.bentoW
     readonly property var cardsById: ({ airpods: airpods, media: media, volume: volume, output: output, launcher: launcher })
     readonly property var cards: [airpods, media, volume, output, launcher]
     readonly property var order: dockPrefs.modules.filter(m => m.visible).map(m => m.id)
@@ -88,7 +94,7 @@ Item {
         // mid-motion; the tight shape comes back once it has settled.
         const morphing = railness > 0 && railness < 1 || moving
         const widest = rail && (pointer.hovered || railOpen > 0) ? Theme.railWidth + Theme.railLabelWidth : column.width
-        const w = morphing ? Math.max(Theme.dockWidth, widest) : widest
+        const w = morphing ? Math.max(column.bentoW, widest) : widest
         const top = morphing ? 0 : column.y - 24        // the grip sits above the column
         const h = morphing ? height : column.height + 30
         const left = mirrored ? column.x : column.x + column.width - w
@@ -154,7 +160,9 @@ Item {
         readonly property real gapBento: Theme.gap
         readonly property real gapRail: 6
         readonly property real railW: Theme.railWidth + Theme.railLabelWidth * dock.railOpen
-        readonly property real half: (Theme.dockWidth - gapBento) / 2
+        // Bento width: whole icon cells less a 5 px inset on each side, or the default width.
+        readonly property real bentoW: dock.gridOn ? dock.grid.width - 10 : Theme.dockWidth
+        readonly property real half: (bentoW - gapBento) / 2
         function mix(a, b) { return a + (b - a) * dock.railness }
 
         // Cell rectangles for both layouts. Bento: modules in order, full width,
@@ -180,7 +188,7 @@ Item {
                     i++
                     continue
                 }
-                bento[id] = { x: 0, y: y, w: Theme.dockWidth }
+                bento[id] = { x: 0, y: y, w: bentoW }
                 y += card.cellHeight + gapBento
                 rail[id] = { y: r }
                 r += card.cellHeight + gapRail
@@ -195,15 +203,24 @@ Item {
             return mix(b.x, 0)   // on the rail every cell spans the column
         }
 
-        width: mix(Theme.dockWidth, railW)
+        width: mix(bentoW, railW)
         height: mix(layout.bentoHeight, layout.railHeight)
         // Plain x, not anchors: switching left/right anchors at run time leaves both attached.
-        x: dock.mirrored ? 12 : dock.width - width - 12
+        // On the grid the column sits in its icon cells, flush with the outer edge of the block.
+        x: dock.gridOn ? (dock.mirrored ? dock.grid.x + 5 : dock.grid.x + dock.grid.width - 5 - width)
+                       : (dock.mirrored ? 12 : dock.width - width - 12)
         // Centre at the saved position along the edge, kept fully on screen (room for the grip above).
-        readonly property real minY: 30
+        readonly property real minY: dock.gridOn ? dock.grid.y + 5 : 30
         readonly property real maxY: dock.height - height - 12
         readonly property real wantY: (grip.held ? grip.dragPosition : dock.position) * dock.height - height / 2
-        y: grip.held ? dock.rubber(wantY, minY, maxY) : Math.max(minY, Math.min(maxY, wantY))
+        // On the grid the bento block rests on a row of icon cells.
+        readonly property int blockRows: dock.gridOn ? Math.round((layout.bentoHeight + 10) / dock.cellH) : 0
+        function rowY(y) {
+            const row = Math.round((y - dock.grid.y - 5) / dock.cellH)
+            return dock.grid.y + 5 + Math.max(0, Math.min(dock.grid.rows - blockRows, row)) * dock.cellH
+        }
+        readonly property real restY: dock.gridOn && !dock.rail ? rowY(wantY) : Math.max(minY, Math.min(maxY, wantY))
+        y: grip.held ? dock.rubber(wantY, minY, maxY) : restY
         scale: 1 + 0.02 * dock.dragLift
         transformOrigin: dock.mirrored ? Item.Left : Item.Right
         onYChanged: if (!(dock.railness > 0 && dock.railness < 1) && !dock.moving) dock.scheduleMask()
@@ -258,7 +275,8 @@ Item {
         property real startPosition: 0.5
         width: 56; height: 20
         x: column.x + (column.width - width) / 2
-        y: column.y - height - 4
+        // Above the dock, or below it when the dock rests on the top row.
+        y: column.y - height - 4 >= 0 ? column.y - height - 4 : column.y + column.height + 4
         opacity: dragging ? 1 : gripHover.hovered ? 0.95 : pointer.hovered ? 0.5 : 0
         Behavior on opacity { NumberAnimation { duration: 160 } }
         Rectangle {
@@ -281,12 +299,16 @@ Item {
                     grip.held = true
                     dock.openCard = ""
                 } else {
-                    // Drop: back inside the screen, onto the top, middle or bottom when close
-                    // to one; the cards spring the rest of the way (settle).
+                    // Drop: back inside the screen and onto the nearest icon row (or, off the
+                    // grid, onto the top, middle or bottom when close); the cards spring the
+                    // rest of the way (settle).
                     const h = column.height
                     let y = Math.max(column.minY, Math.min(column.maxY, grip.dragPosition * dock.height - h / 2))
-                    for (const stop of [column.minY, (dock.height - h) / 2, column.maxY])
-                        if (Math.abs(y - stop) < 36) { y = stop; break }
+                    if (dock.gridOn && !dock.rail)
+                        y = column.rowY(y)
+                    else
+                        for (const stop of [column.minY, (dock.height - h) / 2, column.maxY])
+                            if (Math.abs(y - stop) < 36) { y = stop; break }
                     settle.restart()
                     dockPrefs.set("dock/position", (y + h / 2) / dock.height)
                     grip.held = false

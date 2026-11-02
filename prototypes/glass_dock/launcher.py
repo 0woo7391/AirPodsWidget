@@ -12,6 +12,28 @@ from PySide6.QtQuick import QQuickImageProvider
 MAX_APPS = 12
 
 
+def extract_icon(path: str, side: int) -> QImage:
+    """The file's own icon at `side` px (crisp, no shortcut arrow); null when it has none.
+
+    shortcut: always icon index 0 of the file, not a shortcut's custom IconLocation;
+    read it with IShellLink if a shortcut ever shows the wrong picture.
+    """
+    if os.name != "nt":
+        return QImage()
+    import ctypes
+    from ctypes import wintypes
+    shell32 = ctypes.WinDLL("shell32")
+    shell32.SHDefExtractIconW.argtypes = [wintypes.LPCWSTR, ctypes.c_int, wintypes.UINT,
+                                          ctypes.POINTER(wintypes.HICON), ctypes.POINTER(wintypes.HICON), wintypes.UINT]
+    icon = wintypes.HICON()
+    if shell32.SHDefExtractIconW(path, 0, 0, ctypes.byref(icon), None, side) != 0 or not icon.value:
+        return QImage()
+    try:
+        return QImage.fromHICON(icon.value)
+    finally:
+        ctypes.WinDLL("user32").DestroyIcon(icon)
+
+
 def display_name(path: str) -> str:
     name = Path(path).stem or path
     return name.replace("_", " ").replace("-", " ").strip() or path
@@ -93,8 +115,16 @@ class AppIconProvider(QQuickImageProvider):
         if self._icons is None:
             from PySide6.QtWidgets import QFileIconProvider
             self._icons = QFileIconProvider()
-        icon = self._icons.icon(QFileInfo(path))
-        image = icon.pixmap(side, side).toImage() if not icon.isNull() else QImage()
+        # A shortcut's own icon carries the shell's arrow overlay; use its target's icon instead,
+        # extracted at full size (the shell's cached one for an .exe is small and blurry).
+        info = QFileInfo(path)
+        target = info.symLinkTarget() if info.isSymLink() else ""
+        if target and os.path.exists(target):
+            info = QFileInfo(target)
+        image = extract_icon(info.absoluteFilePath(), side) if info.isFile() else QImage()
+        if image.isNull():
+            icon = self._icons.icon(info)
+            image = icon.pixmap(side, side).toImage() if not icon.isNull() else QImage()
         if not image.isNull():
             image = image.scaled(side, side, Qt.KeepAspectRatio, Qt.SmoothTransformation)
             size.setWidth(image.width())

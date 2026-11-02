@@ -11,8 +11,10 @@ DockCard {
     expandable: false
     magnifies: false
     readonly property var apps: launcherBackend.apps || []
-    readonly property int columns: 3
-    readonly property int tile: 42
+    // Tiles fit the bento width (not the morphing cell), so the card keeps its size while it morphs.
+    readonly property real gridWidth: dock ? dock.bentoWidth : Theme.dockWidth
+    readonly property int columns: gridWidth >= 200 ? 4 : 3
+    readonly property int tile: Math.max(28, Math.min(42, Math.floor((gridWidth - Theme.pad * 2 - (columns - 1) * 8) / columns)))
     readonly property int rows: Math.max(1, Math.ceil(apps.length / columns))
     readonly property int railTile: 40
     property string caption: ""

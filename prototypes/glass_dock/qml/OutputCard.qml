@@ -24,7 +24,7 @@ DockCard {
             Text {
                 x: Theme.pad; y: 36; width: parent.width - Theme.pad * 2
                 text: card.shortName(card.audio.name)
-                wrapMode: Text.Wrap; maximumLineCount: 2; elide: Text.ElideRight
+                wrapMode: Text.WordWrap; maximumLineCount: 2; elide: Text.ElideRight
                 color: Theme.ink; font.family: dockFont; font.pixelSize: 12; font.weight: Font.DemiBold
                 lineHeight: 1.1
             }

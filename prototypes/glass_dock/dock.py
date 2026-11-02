@@ -11,6 +11,8 @@ game suppression and start with Windows.
 from __future__ import annotations
 
 import argparse
+import ctypes
+import math
 import os
 import sys
 import tempfile
@@ -38,8 +40,37 @@ from optical import IconMetrics  # noqa: E402
 from features import DockFeatures  # noqa: E402
 from prefs import DockPrefs, screens_in_order  # noqa: E402
 
-WINDOW_WIDTH = 540   # dock column plus the flyout beside it
+WINDOW_WIDTH = 580   # dock column plus the flyout beside it
 EDGE_MARGIN = 12
+# shortcut: where Explorer starts its icon grid on each monitor, measured here at 100 % with
+# medium icons (first icon at +11, +2). Read real icon positions (LVM_GETITEMPOSITION) if the
+# dock stops lining up with icons on other setups.
+DESKTOP_GRID_OFFSET = (11, 2)
+
+
+def desktop_icon_cell(screen):
+    """The desktop icon grid cell (width, height) in logical px, or None without a desktop."""
+    if os.name != "nt":
+        return None
+    user32 = ctypes.WinDLL("user32")
+    user32.SendMessageW.restype = ctypes.c_ssize_t
+    user32.SendMessageW.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_size_t, ctypes.c_ssize_t]
+    user32.FindWindowExW.restype = ctypes.c_void_p
+    user32.FindWindowExW.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_wchar_p]
+    view = user32.FindWindowExW(user32.FindWindowExW(None, None, "Progman", None), None, "SHELLDLL_DefView", None)
+    worker = None
+    while not view:  # with a wallpaper slideshow the icons live under a WorkerW
+        worker = user32.FindWindowExW(None, worker, "WorkerW", None)
+        if not worker:
+            return None
+        view = user32.FindWindowExW(worker, None, "SHELLDLL_DefView", None)
+    listview = user32.FindWindowExW(view, None, "SysListView32", None)
+    spacing = user32.SendMessageW(listview, 0x1033, 0, 0) if listview else 0   # LVM_GETITEMSPACING
+    width, height = spacing & 0xFFFF, (spacing >> 16) & 0xFFFF
+    if not width or not height:
+        return None
+    ratio = screen.devicePixelRatio()
+    return width / ratio, height / ratio
 
 
 def dock_settings() -> QSettings:
@@ -61,6 +92,7 @@ class DockView(QQuickView):
     alwaysOnTopChanged = Signal()
     minimizedChanged = Signal()
     edgeChanged = Signal()
+    gridChanged = Signal()
     nativeGlassChanged = Signal()
 
     def __init__(self, audio, media, devices, launcher, features, prefs: DockPrefs, *, always_on_top=False,
@@ -70,6 +102,7 @@ class DockView(QQuickView):
         self.prefs = prefs
         self._force_on_top = always_on_top
         self._native_glass = False
+        self._grid = {}
         self._masking = not preview_backdrop
         self.setFlags(self._flags())
         surface = self.format()
@@ -115,7 +148,7 @@ class DockView(QQuickView):
             self.alwaysOnTopChanged.emit()
         elif key == "dock/minimized":
             self.minimizedChanged.emit()
-        elif key in ("dock/screen", "dock/edge"):
+        elif key in ("dock/screen", "dock/edge", "dock/grid", "dock/columns"):
             self.edgeChanged.emit()
             self.place()
 
@@ -129,6 +162,31 @@ class DockView(QQuickView):
         self.resize(WINDOW_WIDTH, area.height())
         x = area.left() if self.edge == "left" else area.right() - WINDOW_WIDTH + 1
         self.setPosition(QPoint(x, area.top()))
+        grid = self._desktop_grid(screen, x, area)
+        if grid != self._grid:
+            self._grid = grid
+            self.gridChanged.emit()
+
+    def _desktop_grid(self, screen, window_x, area) -> dict:
+        """The block of desktop icon cells the dock fills, in window coordinates; {} when off."""
+        cell = desktop_icon_cell(screen) if self.prefs.get("dock/grid") else None
+        if cell is None:
+            return {}
+        cell_w, cell_h = cell
+        geo = screen.geometry()
+        origin_x, origin_y = geo.left() + DESKTOP_GRID_OFFSET[0], geo.top() + DESKTOP_GRID_OFFSET[1]
+        columns = self.prefs.get("dock/columns")
+        total = int((geo.width() - DESKTOP_GRID_OFFSET[0]) // cell_w)
+        first = 0 if self.edge == "left" else max(0, total - columns)
+        # Rows wholly inside the work area (below a top taskbar, above a bottom one).
+        first_row = max(0, math.ceil((area.top() - origin_y) / cell_h))
+        top = origin_y + first_row * cell_h
+        return dict(cellW=cell_w, cellH=cell_h, x=origin_x + first * cell_w - window_x, y=top - area.top(),
+                    width=columns * cell_w, rows=int((area.bottom() + 1 - top) // cell_h))
+
+    @Property("QVariantMap", notify=gridChanged)
+    def grid(self):
+        return self._grid
 
     def followScreens(self, app: QGuiApplication):
         def watch(screen):

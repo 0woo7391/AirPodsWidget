@@ -35,7 +35,10 @@ Item {
     readonly property bool rail: railness > 0.5
     // Docked on the left edge: rail icons sit on the left.
     readonly property bool mirrored: dock ? dock.mirrored : false
-    readonly property real cellHeight: summaryHeight + (railHeight - summaryHeight) * railness
+    // On the desktop icon grid a card spans whole icon rows (less the 10 px gap).
+    readonly property real bentoHeight: dock && dock.gridOn
+        ? Math.max(1, Math.ceil((summaryHeight + 10) / dock.cellH)) * dock.cellH - 10 : summaryHeight
+    readonly property real cellHeight: bentoHeight + (railHeight - bentoHeight) * railness
     readonly property alias hovered: hover.hovered
 
     readonly property bool expanded: expandable && !!dock
@@ -109,6 +112,7 @@ Item {
             width: card.width
             height: card.summaryHeight
             x: card.mirrored ? 0 : parent.width - width
+            y: (card.bentoHeight - card.summaryHeight) / 2   // centred in a taller grid cell
             sourceComponent: card.summary
             opacity: 1 - card.railness
             visible: opacity > 0

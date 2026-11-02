@@ -36,9 +36,10 @@ DockCard {
 
     summary: Component {
         Item {
-            Artwork { x: Theme.pad; y: 14; width: 40; height: 40; source: card.media.artwork || "" }
+            // A narrow dock (two icon cells) drops the artwork to keep room for the title.
+            Artwork { id: art; visible: parent.width >= 170; x: Theme.pad; y: 14; width: 40; height: 40; source: card.media.artwork || "" }
             Column {
-                x: Theme.pad + 50; y: 15; width: parent.width - x - 48; spacing: 2
+                x: art.visible ? Theme.pad + 50 : Theme.pad; y: 15; width: parent.width - x - 48; spacing: 2
                 Text {
                     width: parent.width
                     text: card.available ? card.media.title || "—" : "재생 중 없음"
