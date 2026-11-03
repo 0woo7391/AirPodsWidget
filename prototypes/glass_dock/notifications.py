@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import threading
 import time
 from pathlib import Path
@@ -21,6 +22,12 @@ BROWSERS = ("chrome", "msedge", "edge", "whale", "brave", "opera", "firefox", "v
 # Short, so a browser's own banner is gone almost as soon as the island takes over.
 POLL_SECONDS = 0.5
 MAX_RECENT = 20
+# Follow-up DMs arrive as just "Instagram" + the text; the sender is the one named
+# chat of the last few minutes, if there is exactly one.
+SENDER_MEMORY_MS = 15 * 60 * 1000
+# Instagram re-posts the same notification while it updates; the same sender and text
+# again this soon is the same message.
+DUPLICATE_MS = 30 * 1000
 INBOX_URL = "https://www.instagram.com/direct/inbox/"
 # Chromium browsers keep site permissions in each profile's Preferences file.
 BROWSER_PROFILES = {"Chrome": r"Google\Chrome\User Data", "Edge": r"Microsoft\Edge\User Data",
@@ -48,7 +55,9 @@ def instagram_message(app: str, texts: list[str]):
     """(sender, content) when a toast is an Instagram message, else None.
 
     Browser toasts carry [title, body, "instagram.com"]; the title is the sender, or
-    "Instagram" with the body as "sender: message".
+    "Instagram" with the sender inside the body ("sender: message", "sender님이 ...",
+    "sender sent ...", "sender · message"). An unrecognised body keeps "Instagram"
+    as the sender (see format_shape for logging what it looked like).
     """
     lowered = [t.lower() for t in texts]
     app = app.lower()
@@ -60,10 +69,38 @@ def instagram_message(app: str, texts: list[str]):
     if not lines:
         return None
     title, body = lines[0].strip(), " ".join(lines[1:]).strip()
-    if title.lower() == "instagram" and ":" in body:
-        sender, _, content = body.partition(":")
-        return sender.strip() or "Instagram", content.strip()
+    if title.lower() == "instagram":
+        for pattern in SENDER_PATTERNS:
+            match = pattern.match(body)
+            if match and match.group("sender").strip():
+                content = match.groupdict().get("content")
+                return match.group("sender").strip(), (content if content is not None else body).strip()
     return title, body
+
+
+# How Instagram puts the sender in the body when the title is just "Instagram".
+SENDER_PATTERNS = [
+    re.compile(r"^(?P<sender>[^:\n]{1,60}?)\s*:\s*(?P<content>.*)$", re.S),
+    re.compile(r"^(?P<sender>.{1,60}?)\s*님(?:이|께서)\s"),
+    re.compile(r"^(?P<sender>.{1,60}?)\s+(?:sent|replied|reacted|liked|mentioned)\b", re.I),
+    re.compile(r"^(?P<sender>.{1,60}?)\s+[·•]\s+(?P<content>.*)$", re.S),
+]
+
+
+def format_shape(text: str) -> str:
+    """The text with its letters masked (가 / a / 0, other symbols ◆): the format, not the content."""
+    keep = set(" :·•-,.!?()[]'\"/@")
+    out = []
+    for ch in text:
+        if "가" <= ch <= "힣":
+            out.append("가")
+        elif ch.isascii() and ch.isalpha():
+            out.append("a")
+        elif ch.isdigit():
+            out.append("0")
+        else:
+            out.append(ch if ch in keep else "◆")
+    return "".join(out)
 
 
 class NotificationWatcher(QObject):
@@ -87,7 +124,16 @@ class NotificationWatcher(QObject):
 
     @Slot(str, str)
     def add(self, sender, content):
-        self._messages.insert(0, dict(sender=sender, content=content, time=time.time() * 1000))
+        now = time.time() * 1000
+        if sender == "Instagram":
+            named = {m["sender"] for m in self._messages
+                     if m["sender"] != "Instagram" and now - m["time"] < SENDER_MEMORY_MS}
+            if len(named) == 1:
+                sender = named.pop()
+        if any(m["sender"] == sender and m["content"] == content and now - m["time"] < DUPLICATE_MS
+               for m in self._messages):
+            return
+        self._messages.insert(0, dict(sender=sender, content=content, time=now))
         del self._messages[MAX_RECENT:]
         self._unread += 1
         self.messagesChanged.emit()
@@ -106,6 +152,19 @@ class NotificationWatcher(QObject):
         if self._unread:
             self._unread = 0
             self.messagesChanged.emit()
+
+    @staticmethod
+    def _log_shape(app, texts):
+        """Record an unrecognised Instagram toast's format (masked, no names or text) for fixing the parser."""
+        log = Path(os.environ.get("LOCALAPPDATA", ".")) / "GlassDock" / "instagram-formats.log"
+        try:
+            lines = log.read_text(encoding="utf-8").splitlines()[-49:] if log.exists() else []
+            lines.append(f"{time.strftime('%Y-%m-%d %H:%M')} {app.split()[0] if app else '?'} | "
+                         + " | ".join(format_shape(t) for t in texts))
+            log.parent.mkdir(parents=True, exist_ok=True)
+            log.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        except OSError:
+            pass
 
     @Slot()
     def openInbox(self):
@@ -168,6 +227,8 @@ class NotificationWatcher(QObject):
                         binding = item.notification.visual.get_binding(KnownNotificationBindings.toast_generic)
                         texts = [t.text or "" for t in binding.get_text_elements()] if binding else []
                         found = instagram_message(app, texts)
+                        if found and found[0] == "Instagram":
+                            self._log_shape(app, texts)
                         if found:
                             self._found.emit(*found)
                             if self.replace_toasts:

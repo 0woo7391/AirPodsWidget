@@ -211,3 +211,26 @@ def test_blocked_instagram_permission_is_found(tmp_path, monkeypatch):
     (profile / "Preferences").write_text(json.dumps(
         {"profile": {"content_settings": {"exceptions": {"notifications": sites}}}}), encoding="utf-8")
     assert blocked_browsers() == []
+
+
+def test_sender_found_in_other_instagram_body_formats():
+    from notifications import format_shape, instagram_message
+    chrome = "Google Chrome Chrome"
+    assert instagram_message(chrome, ["Instagram", "공주님이 메시지를 보냈습니다.", "instagram.com"])[0] == "공주"
+    assert instagram_message(chrome, ["Instagram", "mika sent you a message.", "instagram.com"])[0] == "mika"
+    assert instagram_message(chrome, ["Instagram", "mika · 사진", "instagram.com"]) == ("mika", "사진")
+    assert instagram_message(chrome, ["Instagram", "새 알림이 있습니다", "instagram.com"])[0] == "Instagram"
+    assert format_shape("공주: hi 12!") == "가가: aa 00!"
+
+
+def test_unnamed_follow_up_dm_takes_the_one_recent_sender_and_repeats_are_dropped():
+    from notifications import NotificationWatcher
+    watcher = NotificationWatcher()
+    watcher.add("공주", "안녕")
+    watcher.add("Instagram", "뭐해")            # follow-up without a name
+    watcher.add("Instagram", "뭐해")            # the same notification re-posted
+    assert [(m["sender"], m["content"]) for m in watcher.messages] == [("공주", "뭐해"), ("공주", "안녕")]
+    assert watcher.unread == 2
+    watcher.add("mika", "hi")
+    watcher.add("Instagram", "누구게")           # two named chats: no guess
+    assert watcher.messages[0]["sender"] == "Instagram"
