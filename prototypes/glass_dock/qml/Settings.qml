@@ -498,6 +498,12 @@ Rectangle {
                 }
                 SettingRow {
                     visible: root.pref("island/instagram")
+                    label: "브라우저 알림 대신 아일랜드만"
+                    hint: "읽은 인스타 알림을 Windows 알림에서 지워 두 번 뜨지 않게 합니다. 브라우저 배너가 아주 잠깐 보일 수 있습니다."
+                    PrefToggle { key: "island/instagramReplace" }
+                }
+                SettingRow {
+                    visible: root.pref("island/instagram")
                     label: "메시지 내용 보이기"
                     hint: "끄면 보낸 사람만 보이고 내용은 \"Instagram 새 메시지\"로 가립니다."
                     PrefToggle { key: "island/instagramContent" }

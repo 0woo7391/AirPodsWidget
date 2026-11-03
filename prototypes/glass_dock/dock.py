@@ -534,6 +534,9 @@ def main() -> int:
                             usage_path=usage_path)
     watcher = NotificationWatcher()
     watcher.message.connect(features.on_instagram)
+    watcher.replace_toasts = prefs.get("island/instagramReplace")
+    prefs.changed.connect(lambda key: setattr(watcher, "replace_toasts", prefs.get(key))
+                          if key == "island/instagramReplace" else None)
     view = DockView(audio, media, devices, launcher, features, prefs, watcher=watcher, always_on_top=args.on_top,
                     preview_backdrop=previewing)
     hub = IslandHub(view, prefs)

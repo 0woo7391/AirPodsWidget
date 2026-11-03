@@ -18,7 +18,8 @@ from PySide6.QtCore import Property, QObject, QUrl, Signal, Slot
 from PySide6.QtGui import QDesktopServices
 
 BROWSERS = ("chrome", "msedge", "edge", "whale", "brave", "opera", "firefox", "vivaldi")
-POLL_SECONDS = 2.0
+# Short, so a browser's own banner is gone almost as soon as the island takes over.
+POLL_SECONDS = 0.5
 MAX_RECENT = 20
 INBOX_URL = "https://www.instagram.com/direct/inbox/"
 # Chromium browsers keep site permissions in each profile's Preferences file.
@@ -79,6 +80,9 @@ class NotificationWatcher(QObject):
         self._thread = None
         self._messages: list[dict] = []   # newest first
         self._unread = 0
+        # Take over Instagram toasts: remove the browser's notification once read, so only the
+        # island shows it (set from the settings).
+        self.replace_toasts = True
         self._found.connect(self.add)
 
     @Slot(str, str)
@@ -166,6 +170,11 @@ class NotificationWatcher(QObject):
                         found = instagram_message(app, texts)
                         if found:
                             self._found.emit(*found)
+                            if self.replace_toasts:
+                                try:
+                                    listener.remove_notification(key)
+                                except Exception:
+                                    pass  # already dismissed by the user; nothing to take over
                 seen = set(current)
             except Exception as exc:  # keep polling; a single failed read is not fatal
                 self._set_status(f"알림 읽기 오류 ({type(exc).__name__})")

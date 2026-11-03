@@ -26,7 +26,7 @@ DEFAULTS = {
     "island/connect": True, "island/disconnect": True, "island/lowBattery": True,
     "island/suppressDuringGames": True,
     # Instagram DMs read from Windows notifications; content off by default (sender only).
-    "island/instagram": True, "island/instagramContent": False,
+    "island/instagram": True, "island/instagramContent": False, "island/instagramReplace": True,
     "battery/threshold": 20, "battery/sound": True, "battery/soundVolume": 60, "battery/soundDuringGames": True,
     "media/autoPause": True, "media/autoResume": False, "media/followAny": True,
     "system/startWithWindows": False,
