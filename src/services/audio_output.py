@@ -297,6 +297,88 @@ def current_output() -> AudioOutput:
     return _with_com(_default_output)
 
 
+IID_DEVICE_TOPOLOGY = "{2A07407E-6497-4A18-9787-32F79BD0D98F}"
+IID_KS_CONTROL = "{28F54685-06FD-11D2-B27A-00A0C9223196}"
+KSPROPSETID_BT_AUDIO = "{7FA06C40-B8F6-4C7E-8556-E8C33A12E54D}"
+KSPROPERTY_ONESHOT_RECONNECT = 0
+KSPROPERTY_TYPE_GET = 1
+
+
+class _KsProperty(ctypes.Structure):
+    _fields_ = [("Set", GUID), ("Id", wintypes.ULONG), ("Flags", wintypes.ULONG)]
+
+
+def _activate(device: ctypes.c_void_p, iid: str) -> ctypes.c_void_p:
+    result = ctypes.c_void_p()
+    _check_hresult(_vtable_call(device, 3, HRESULT,
+                                [ctypes.POINTER(GUID), wintypes.DWORD, ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p)],
+                                ctypes.byref(_guid(iid)), CLSCTX_INPROC_SERVER, None, ctypes.byref(result)), "Activate")
+    return result
+
+
+def _reconnect_bluetooth_endpoints(address: str) -> int:
+    """Send the Bluetooth audio driver's one-shot reconnect to every endpoint of a device.
+
+    The endpoint's KS filter path carries the Bluetooth address, so the device is matched
+    by address, not by name. Returns how many endpoints received the request.
+    """
+    enumerator = _co_create(CLSID_MM_DEVICE_ENUMERATOR, IID_MM_DEVICE_ENUMERATOR)
+    collection = ctypes.c_void_p()
+    sent = 0
+    try:
+        _check_hresult(_vtable_call(enumerator, 3, HRESULT, [wintypes.DWORD, wintypes.DWORD, ctypes.POINTER(ctypes.c_void_p)],
+                                    E_DATA_FLOW_RENDER, DEVICE_STATEMASK_ALL, ctypes.byref(collection)), "EnumAudioEndpoints")
+        count = wintypes.UINT()
+        _check_hresult(_vtable_call(collection, 3, HRESULT, [ctypes.POINTER(wintypes.UINT)], ctypes.byref(count)),
+                       "GetDeviceCount")
+        for index in range(count.value):
+            device = topology = connector = filter_device = control = None
+            filter_id = ctypes.c_wchar_p()
+            try:
+                device = ctypes.c_void_p()
+                _check_hresult(_vtable_call(collection, 4, HRESULT, [wintypes.DWORD, ctypes.POINTER(ctypes.c_void_p)],
+                                            index, ctypes.byref(device)), "Item")
+                topology = _activate(device, IID_DEVICE_TOPOLOGY)
+                connector = ctypes.c_void_p()
+                _check_hresult(_vtable_call(topology, 4, HRESULT, [wintypes.UINT, ctypes.POINTER(ctypes.c_void_p)],
+                                            0, ctypes.byref(connector)), "GetConnector")
+                _check_hresult(_vtable_call(connector, 10, HRESULT, [ctypes.POINTER(ctypes.c_wchar_p)],
+                                            ctypes.byref(filter_id)), "GetDeviceIdConnectedTo")
+                path = (filter_id.value or "").casefold()
+                if "bthenum" not in path or address.casefold() not in path:
+                    continue
+                filter_device = ctypes.c_void_p()
+                _check_hresult(_vtable_call(enumerator, 5, HRESULT, [wintypes.LPCWSTR, ctypes.POINTER(ctypes.c_void_p)],
+                                            filter_id.value, ctypes.byref(filter_device)), "GetDevice")
+                control = _activate(filter_device, IID_KS_CONTROL)
+                prop = _KsProperty(_guid(KSPROPSETID_BT_AUDIO), KSPROPERTY_ONESHOT_RECONNECT, KSPROPERTY_TYPE_GET)
+                returned = wintypes.ULONG()
+                _check_hresult(_vtable_call(control, 3, HRESULT,
+                                            [ctypes.POINTER(_KsProperty), wintypes.ULONG, ctypes.c_void_p, wintypes.ULONG,
+                                             ctypes.POINTER(wintypes.ULONG)],
+                                            ctypes.byref(prop), ctypes.sizeof(prop), None, 0, ctypes.byref(returned)),
+                               "KsProperty")
+                sent += 1
+            except AudioOutputError:
+                continue   # endpoints without a topology (virtual devices) are not Bluetooth audio
+            finally:
+                if filter_id:
+                    ctypes.windll.ole32.CoTaskMemFree(filter_id)
+                for pointer in (control, filter_device, connector, topology, device):
+                    if pointer:
+                        _release(pointer)
+        return sent
+    finally:
+        if collection:
+            _release(collection)
+        _release(enumerator)
+
+
+def reconnect_bluetooth_audio(address: int) -> int:
+    """Ask Windows to connect a paired Bluetooth headset the way its Settings "Connect" does."""
+    return _with_com(lambda: _reconnect_bluetooth_endpoints(f"{address:012x}"))
+
+
 def active_outputs() -> list[AudioOutput]:
     return _with_com(_enumerate_outputs)
 

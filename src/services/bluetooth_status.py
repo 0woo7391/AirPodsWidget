@@ -158,6 +158,11 @@ def find_connected_airpods() -> Optional[BluetoothDeviceStatus]:
 def reconnect_paired_audio(device: Optional[BluetoothDeviceStatus] = None) -> None:
     """Ask the Windows Bluetooth stack to reconnect a paired audio device.
 
+    First the Bluetooth audio driver's one-shot reconnect on the device's audio
+    endpoints (what Settings' "Connect" uses). Toggling the Audio Sink service
+    below is accepted by Windows but often never brings the link up, so it is
+    only the fallback for a device with no audio endpoint.
+
     Windows does not expose a general desktop ``ConnectAsync`` for a paired
     A2DP endpoint. Resetting the built-in Audio Sink service is the documented
     user-mode Bluetooth service operation that makes Windows renegotiate the
@@ -170,6 +175,13 @@ def reconnect_paired_audio(device: Optional[BluetoothDeviceStatus] = None) -> No
     device = device or find_airpods_status()
     if device is None or not device.paired:
         raise BluetoothConnectionError("No paired Bluetooth audio device was found")
+
+    from services.audio_output import AudioOutputError, reconnect_bluetooth_audio
+    try:
+        if reconnect_bluetooth_audio(device.address):
+            return
+    except AudioOutputError:
+        pass
 
     device_info = BLUETOOTH_DEVICE_INFO()
     device_info.dwSize = ctypes.sizeof(BLUETOOTH_DEVICE_INFO)
