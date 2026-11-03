@@ -60,9 +60,9 @@ DockCard {
             }
             Text {
                 x: Theme.pad; y: 36; width: parent.width - Theme.pad * 2
-                text: card.latest ? card.latest.sender : "새 메시지 없음"
+                text: card.latest ? card.latest.sender : notificationWatcher.blocked ? "알림이 차단됨" : "새 메시지 없음"
                 elide: Text.ElideRight
-                color: card.latest ? Theme.ink : Theme.inkSecondary
+                color: card.latest ? Theme.ink : notificationWatcher.blocked ? Theme.warn : Theme.inkSecondary
                 font.family: dockFont; font.pixelSize: 13; font.weight: Font.DemiBold
             }
             Text {
@@ -132,7 +132,9 @@ DockCard {
             Text {
                 visible: card.shown.length === 0
                 x: Theme.pad; y: 60; width: parent.width - Theme.pad * 2; wrapMode: Text.Wrap
-                text: "아직 받은 DM이 없습니다. 브라우저에서 instagram.com 알림을 허용해 두면 여기에 쌓입니다."
+                text: notificationWatcher.blocked
+                    ? notificationWatcher.status + ". 브라우저에서 instagram.com의 알림을 허용해야 DM이 여기에 쌓입니다."
+                    : "아직 받은 DM이 없습니다. 브라우저에서 instagram.com 알림을 허용해 두면 여기에 쌓입니다."
                 color: Theme.inkSecondary; font.family: dockFont; font.pixelSize: 11
             }
             GlassButton {

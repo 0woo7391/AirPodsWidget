@@ -8,8 +8,11 @@ Polls every two seconds; toasts already there when it starts are not news.
 from __future__ import annotations
 
 import asyncio
+import json
+import os
 import threading
 import time
+from pathlib import Path
 
 from PySide6.QtCore import Property, QObject, QUrl, Signal, Slot
 from PySide6.QtGui import QDesktopServices
@@ -18,6 +21,26 @@ BROWSERS = ("chrome", "msedge", "edge", "whale", "brave", "opera", "firefox", "v
 POLL_SECONDS = 2.0
 MAX_RECENT = 20
 INBOX_URL = "https://www.instagram.com/direct/inbox/"
+# Chromium browsers keep site permissions in each profile's Preferences file.
+BROWSER_PROFILES = {"Chrome": r"Google\Chrome\User Data", "Edge": r"Microsoft\Edge\User Data",
+                    "Whale": r"Naver\Naver Whale\User Data"}
+
+
+def blocked_browsers() -> list[str]:
+    """Browsers whose profile blocks instagram.com notifications (setting 2): no toast, so nothing to read."""
+    blocked = []
+    base = Path(os.environ.get("LOCALAPPDATA", ""))
+    for name, folder in BROWSER_PROFILES.items():
+        for prefs in (base / folder).glob("*/Preferences"):
+            try:
+                data = json.loads(prefs.read_text(encoding="utf-8"))
+                sites = data["profile"]["content_settings"]["exceptions"]["notifications"]
+            except (OSError, ValueError, KeyError, TypeError):
+                continue
+            if any("instagram.com" in site and isinstance(v, dict) and v.get("setting") == 2 for site, v in sites.items()):
+                blocked.append(name)
+                break
+    return blocked
 
 
 def instagram_message(app: str, texts: list[str]):
@@ -89,6 +112,10 @@ class NotificationWatcher(QObject):
     def status(self):
         return self._status
 
+    @Property(bool, notify=statusChanged)
+    def blocked(self):
+        return "차단" in self._status
+
     def _set_status(self, text):
         if text != self._status:
             self._status = text
@@ -113,12 +140,18 @@ class NotificationWatcher(QObject):
         except Exception as exc:  # no WinRT bindings or an old Windows
             self._set_status(f"알림을 읽을 수 없음 ({type(exc).__name__})")
             return
-        self._set_status("알림 읽는 중")
         seen = None
+        checked = 0.0
         while not self._stop.is_set():
             try:
                 items = await listener.get_notifications_async(NotificationKinds.TOAST)
-                self._set_status("알림 읽는 중")
+                # A browser that blocks instagram.com never makes a toast; say so instead of
+                # looking healthy. Checked once a minute (a small file read).
+                if time.monotonic() - checked > 60:
+                    checked = time.monotonic()
+                    blocked = blocked_browsers()
+                self._set_status(f"{', '.join(blocked)}에서 instagram.com 알림이 차단돼 있습니다" if blocked
+                                 else "알림 읽는 중")
                 current = {}
                 for item in items:
                     current[item.id] = item

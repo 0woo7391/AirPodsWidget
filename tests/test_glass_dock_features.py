@@ -195,3 +195,19 @@ def test_watcher_keeps_recent_dms_and_unread_count():
     assert watcher.unread == MAX_RECENT + 3 and len(seen) == MAX_RECENT + 3
     watcher.markRead()
     assert watcher.unread == 0 and len(watcher.messages) == MAX_RECENT
+
+
+def test_blocked_instagram_permission_is_found(tmp_path, monkeypatch):
+    import json
+    from notifications import blocked_browsers
+    profile = tmp_path / "Google" / "Chrome" / "User Data" / "Default"
+    profile.mkdir(parents=True)
+    sites = {"https://www.instagram.com:443,*": {"setting": 2}}
+    (profile / "Preferences").write_text(json.dumps(
+        {"profile": {"content_settings": {"exceptions": {"notifications": sites}}}}), encoding="utf-8")
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    assert blocked_browsers() == ["Chrome"]
+    sites["https://www.instagram.com:443,*"]["setting"] = 1
+    (profile / "Preferences").write_text(json.dumps(
+        {"profile": {"content_settings": {"exceptions": {"notifications": sites}}}}), encoding="utf-8")
+    assert blocked_browsers() == []
