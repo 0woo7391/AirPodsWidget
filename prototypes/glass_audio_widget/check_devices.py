@@ -160,6 +160,24 @@ class DeviceTests(unittest.TestCase):
         self.backend._advertisement(advertisement(percent=1,model=0x2014)); self.backend.refresh()
         self.assertEqual(self.backend.batteries[0]["value"],80)
 
+    def test_bound_source_follows_the_airpods_new_address(self):
+        self.bind(); self.backend._advertisement(advertisement()); self.backend.refresh()
+        # Not connected, or the old address still talking: a new address is ignored.
+        self.clock.now+=61; self.backend._advertisement(advertisement("AA:BB:CC:DD:EE:02",percent=5))
+        self.assertEqual(self.backend.batterySources,["AA:BB:CC:DD:EE:01"])
+        self.service.records[0].connected=True; self.poll()
+        self.backend._advertisement(advertisement()); self.clock.now+=30
+        self.backend._advertisement(advertisement("AA:BB:CC:DD:EE:02",percent=5))
+        self.assertEqual(self.backend.batterySources,["AA:BB:CC:DD:EE:01"])
+        # Quiet for a minute while connected: the same model nearby is followed and saved.
+        self.clock.now+=31; self.backend._advertisement(advertisement("AA:BB:CC:DD:EE:02",percent=5,model=0x2014))
+        self.assertEqual(self.backend.batterySources,["AA:BB:CC:DD:EE:01"])
+        self.backend._advertisement(advertisement("AA:BB:CC:DD:EE:02",percent=7))
+        self.clock.now+=1; self.backend._advertisement(advertisement("AA:BB:CC:DD:EE:02",percent=7)); self.backend.refresh()
+        self.assertEqual(self.backend.batterySources,["AA:BB:CC:DD:EE:02"])
+        self.assertEqual(self.backend.batteries[0]["value"],70)
+        self.assertIn("AA:BB:CC:DD:EE:02",self.settings.value("battery/sources"))
+
     def test_battery_gaps_do_not_change_bluetooth_state(self):
         self.bind(); self.service.records[0].connected=True; self.poll()
         self.backend._advertisement(advertisement()); self.clock.now+=11; self.backend.refresh()

@@ -36,6 +36,9 @@ class DeviceBackend(QObject):
     # Auto sources: with no source bound and the registered AirPods connected, accept the
     # nearest AirPods advertisement (one model per session), like the original widget does.
     AUTO_RSSI = -70
+    # AirPods change their BLE address now and then. A bound source quiet this long, while the
+    # target is connected, follows the same model advertising nearby (the AUTO_RSSI rule).
+    SOURCE_QUIET_SECONDS = 60
 
     def __init__(self, service=bluetooth_status, scanner=None, settings=None, *, start=True, clock=time.monotonic,
                  auto_sources=False):
@@ -58,6 +61,7 @@ class DeviceBackend(QObject):
         self._query_error = ""
         self._scanner_error = ""
         self._last_hint = -float("inf")
+        self._source_heard = -float("inf")
         self._hinted = False
         self._stop = threading.Event()
         self._commands = queue.Queue()
@@ -224,7 +228,9 @@ class DeviceBackend(QObject):
                                      name=advertisement.state.model_name, seen=self.clock())
         if not self.target: return
         if self.sources:
-            if not any(v["address"] == address and v["model"] == advertisement.model_id for v in self.sources): return
+            if any(v["address"] == address and v["model"] == advertisement.model_id for v in self.sources):
+                self._source_heard = self.clock()
+            elif not self._follow_new_address(address, advertisement): return
         elif not self._auto_accept(advertisement): return
         self._manager.update(advertisement)
         if not self._manager.last_update_accepted: return
@@ -232,6 +238,17 @@ class DeviceBackend(QObject):
             if getattr(advertisement.state, name).battery.percent is not None:
                 self._valid_at[name] = self.clock()
         self.refresh()
+
+    def _follow_new_address(self, address, advertisement):
+        if (self.clock() - self._source_heard < self.SOURCE_QUIET_SECONDS or not self._state["connected"]
+                or advertisement.rssi < self.AUTO_RSSI or not any(v["model"] == advertisement.model_id for v in self.sources)):
+            return False
+        moved = [dict(address=address, model=advertisement.model_id)]
+        if not self._save({"battery/sources": json.dumps(moved)}): return False
+        self.sources = moved
+        self._source_heard = self.clock()
+        self.candidatesChanged.emit()
+        return True
 
     def _auto_accept(self, advertisement):
         if not self.auto_sources or not self._state["connected"] or advertisement.rssi < self.AUTO_RSSI:
