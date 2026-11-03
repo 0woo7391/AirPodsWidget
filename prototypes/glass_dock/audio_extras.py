@@ -1,4 +1,4 @@
-"""Microphone mute and per-app volume (Windows Core Audio), for the mic and mixer modules.
+"""Microphone mute, per-app volume and the output level meter (Windows Core Audio), for the mic and volume modules.
 
 Reuses the raw COM helpers of services/audio_output.py. A worker thread reads the
 default microphone and the playback sessions once a second and runs commands;
@@ -10,6 +10,7 @@ import ctypes
 import os
 import queue
 import threading
+import time
 from ctypes import wintypes
 
 from PySide6.QtCore import Property, QObject, Signal, Slot
@@ -21,6 +22,7 @@ AUDIO_SESSION_STATE_EXPIRED = 2
 IID_SESSION_MANAGER2 = "{77AA99A0-1BD6-484F-8BC7-2C654C9A9B6F}"
 IID_SESSION_CONTROL2 = "{BFB7FF88-7239-4FC9-8FA2-07C950BE9C6D}"
 IID_SIMPLE_VOLUME = "{87CE5498-68D6-44E5-9215-6DA47EF883D8}"
+IID_AUDIO_METER = "{C02216F6-8C67-4B5B-9D00-D008E73E0064}"
 HRESULT = ao.HRESULT
 REFRESH_SECONDS = 1.0
 
@@ -241,6 +243,16 @@ class AudioExtras(QObject):
         if entry:
             self._commands.put(("mute", key, not entry["muted"]))
 
+    # Windows remembers each app's level between runs; these put it back to 100 % and unmuted.
+    @Slot(str)
+    def resetApp(self, key):
+        self._commands.put(("reset", key))
+
+    @Slot()
+    def resetAllApps(self):
+        for entry in self._sessions:
+            self._commands.put(("reset", entry["key"]))
+
     def start(self):
         if self._thread is None:
             self._thread = threading.Thread(target=self._run, name="AudioExtras", daemon=True)
@@ -264,6 +276,8 @@ class AudioExtras(QObject):
                             set_session(command[1], volume=command[2])
                         elif command[0] == "mute":
                             set_session(command[1], muted=command[2])
+                        elif command[0] == "reset":
+                            set_session(command[1], volume=100, muted=False)
                         if self._commands.empty():
                             break
                 except queue.Empty:
@@ -289,3 +303,60 @@ class AudioExtras(QObject):
             self._sessions = sessions
             self.sessionsChanged.emit()
         self._first = False
+
+
+class AudioMeter(QObject):
+    """The default output's peak level, 30 times a second, for the music visualizer and the volume card."""
+    levelChanged = Signal()
+    _value = Signal(float)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._level = 0.0
+        self._stop = threading.Event()
+        self._thread = None
+        self._value.connect(self._apply)
+
+    @Property(float, notify=levelChanged)
+    def level(self):
+        return self._level
+
+    def start(self):
+        if self._thread is None:
+            self._thread = threading.Thread(target=self._run, name="AudioMeter", daemon=True)
+            self._thread.start()
+
+    def stop(self):
+        self._stop.set()
+
+    def _run(self):
+        def work():
+            device = meter = None
+            opened = 0.0
+            while not self._stop.wait(1 / 30):
+                try:
+                    # Re-open now and then: the default output can change (AirPods connect).
+                    if meter is None or time.monotonic() - opened > 5:
+                        ao._release(meter)
+                        ao._release(device)
+                        device = _default_device(ao.E_DATA_FLOW_RENDER, ao.E_ROLE_MULTIMEDIA)
+                        meter = _activate(device, IID_AUDIO_METER)
+                        opened = time.monotonic()
+                    peak = ctypes.c_float()
+                    ao._check_hresult(ao._vtable_call(meter, 3, HRESULT, [ctypes.POINTER(ctypes.c_float)],
+                                                      ctypes.byref(peak)), "GetPeakValue")
+                    self._value.emit(float(peak.value))
+                except Exception:
+                    ao._release(meter)
+                    ao._release(device)
+                    device = meter = None
+                    self._value.emit(0.0)
+            ao._release(meter)
+            ao._release(device)
+        ao._with_com(work)
+
+    @Slot(float)
+    def _apply(self, value):
+        if abs(value - self._level) > 0.002:
+            self._level = value
+            self.levelChanged.emit()

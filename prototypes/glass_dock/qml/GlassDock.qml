@@ -27,8 +27,8 @@ Item {
     readonly property real cellH: gridOn ? grid.cellH : 0
     readonly property real bentoWidth: column.bentoW
     readonly property var cardsById: ({ airpods: airpods, media: media, volume: volume, output: output, launcher: launcher,
-                                        clock: clock, memo: memo, mic: mic, mixer: mixer, system: system })
-    readonly property var cards: [airpods, media, volume, output, launcher, clock, memo, mic, mixer, system]
+                                        clock: clock, memo: memo, mic: mic, system: system })
+    readonly property var cards: [airpods, media, volume, output, launcher, clock, memo, mic, system]
     function moduleOf(id) { return dockPrefs.modules.find(m => m.id === id) }
     function sizeOf(id) { const m = moduleOf(id); return m ? m.size : "full" }
     function sizesOf(id) { const m = moduleOf(id); return m ? m.sizes : ["full"] }
@@ -375,13 +375,6 @@ Item {
         }
         MicCard {
             id: mic
-            dock: dock; railIndex: dock.order.indexOf(cardId)
-            visible: railIndex >= 0
-            x: column.place(cardId, "x"); y: column.place(cardId, "y"); width: column.place(cardId, "w")
-            dockLeft: column.x + x; dockTop: column.y + y
-        }
-        MixerCard {
-            id: mixer
             dock: dock; railIndex: dock.order.indexOf(cardId)
             visible: railIndex >= 0
             x: column.place(cardId, "x"); y: column.place(cardId, "y"); width: column.place(cardId, "w")

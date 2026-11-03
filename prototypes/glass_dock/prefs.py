@@ -10,15 +10,15 @@ import json
 from PySide6.QtCore import Property, QObject, QSettings, Signal, Slot
 from PySide6.QtGui import QGuiApplication
 
-MODULES = ["airpods", "media", "volume", "output", "launcher", "clock", "memo", "mic", "mixer", "system"]
+MODULES = ["airpods", "media", "volume", "output", "launcher", "clock", "memo", "mic", "system"]
 MODULE_NAMES = {"airpods": "AirPods", "media": "미디어", "volume": "볼륨", "output": "출력 장치",
-                "launcher": "빠른 실행", "clock": "시계", "memo": "메모", "mic": "마이크",
-                "mixer": "앱별 볼륨", "system": "시스템"}
+                "launcher": "빠른 실행", "clock": "시계", "memo": "메모", "mic": "마이크", "system": "시스템"}
 # Sizes each module comes in: "half" pairs with a neighbouring half card, "full" spans the dock.
 # The first is the default.
-MODULE_SIZES = {"airpods": ["full"], "media": ["full"], "volume": ["half"], "output": ["half"],
+# Volume also holds every app's own level (its flyout), so there is no separate mixer.
+MODULE_SIZES = {"airpods": ["full"], "media": ["full"], "volume": ["half", "full"], "output": ["half"],
                 "launcher": ["full"], "clock": ["half", "full"], "memo": ["full"], "mic": ["half"],
-                "mixer": ["full", "half"], "system": ["half"]}
+                "system": ["half"]}
 # Shown until the user edits the dock; the rest wait in the edit mode's gallery.
 DEFAULT_VISIBLE = ["airpods", "media", "volume", "output", "launcher"]
 

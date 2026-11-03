@@ -30,6 +30,7 @@ Item {
     property real railHeight: Theme.railRow
     property Component railContent   // replaces the icon row (the launcher's app rail)
     property Component railIconComponent   // in place of the Lucian icon (a glyph not in the set)
+    property Component backdrop            // drawn over the glass, under the content (media artwork)
 
     readonly property real railness: dock ? dock.railness : 0
     readonly property real railOpen: dock ? dock.railOpen : 0
@@ -120,6 +121,22 @@ Item {
         radius: Theme.radius - (Theme.radius - 16) * card.railness
         lit: hover.hovered || card.expanded
         lift: card.dock ? Math.max(0.7 * card.dock.dragLift, card.dragging ? 1 : 0) : 0
+    }
+    Loader {
+        anchors.fill: parent
+        active: !!card.backdrop
+        sourceComponent: card.backdrop
+        opacity: 1 - card.railness
+        visible: opacity > 0
+    }
+    // The rim again over a backdrop, so the card keeps its edge.
+    Rectangle {
+        anchors.fill: parent
+        visible: !!card.backdrop && card.railness < 1
+        radius: Theme.radius
+        color: "transparent"
+        border.width: 1
+        border.color: hover.hovered || card.expanded ? Theme.strokeLit : Theme.stroke
     }
     // The open card's rim glows toward the flyout, tying the two together.
     Rectangle {

@@ -1,9 +1,10 @@
 import QtQuick
+import QtQuick.Effects
 
 DockCard {
     id: card
     cardId: "media"
-    summaryHeight: 68
+    summaryHeight: 84
     detailHeight: 214
 
     readonly property var media: mediaBackend.state
@@ -29,6 +30,27 @@ DockCard {
         return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0")
     }
 
+    // The level, smoothed, so the artwork can pulse with the music.
+    property real beat: 0
+    FrameAnimation {
+        running: card.media.playing || card.beat > 0.01
+        onTriggered: {
+            const target = card.media.playing ? Math.min(1, audioMeter.level * 1.3) : 0
+            card.beat += (target - card.beat) * (target > card.beat ? 0.45 : 0.1)
+        }
+    }
+    readonly property color appTint: {
+        const name = (media.sourceName || "").toLowerCase()
+        return name.indexOf("spotify") >= 0 ? "#1DB954" : name.indexOf("youtube") >= 0 ? "#FF2D55" : "#6D6AF5"
+    }
+    backdrop: Component {
+        ArtBackdrop {
+            source: card.media.artwork || ""
+            sourceName: card.media.sourceName || ""
+            playing: card.available && card.media.playing
+        }
+    }
+
     railIcon: "music"
     railLabel: available ? media.title || "—" : "재생 중 없음"
     railStatus: available ? media.artist || media.sourceName || "" : ""
@@ -37,9 +59,26 @@ DockCard {
     summary: Component {
         Item {
             // A narrow dock (two icon cells) drops the artwork to keep room for the title.
-            Artwork { id: art; visible: parent.width >= 170; x: Theme.pad; y: 14; width: 40; height: 40; source: card.media.artwork || "" }
+            // The artwork floats on a shadow, pulses with the music and sinks back when paused.
+            Item {
+                id: art
+                visible: parent.width >= 170
+                x: Theme.pad; y: (parent.height - height) / 2
+                width: 54; height: 54
+                property real rest: card.media.playing ? 1 : 0.92
+                Behavior on rest { NumberAnimation { duration: 320; easing.type: Easing.OutBack } }
+                scale: rest + 0.04 * card.beat
+                opacity: card.media.playing ? 1 : 0.8
+                Behavior on opacity { NumberAnimation { duration: 320 } }
+                RectangularShadow {
+                    anchors.fill: parent
+                    radius: 12; blur: 16; offset.y: 5; spread: -2
+                    color: "#99000000"
+                }
+                Artwork { anchors.fill: parent; radius: 12; source: card.media.artwork || ""; tint: card.appTint }
+            }
             Column {
-                x: art.visible ? Theme.pad + 50 : Theme.pad; y: 15; width: parent.width - x - 48; spacing: 2
+                x: art.visible ? Theme.pad + 66 : Theme.pad; y: 15; width: parent.width - x - 48; spacing: 2
                 Text {
                     width: parent.width
                     text: card.available ? card.media.title || "—" : "재생 중 없음"
@@ -54,8 +93,16 @@ DockCard {
                     color: Theme.inkSecondary; font.family: dockFont; font.pixelSize: 11
                 }
             }
+            Visualizer {
+                visible: card.available
+                x: art.visible ? Theme.pad + 66 : Theme.pad
+                y: parent.height - 16 - maxHeight
+                bars: Math.max(6, Math.floor((parent.width - x - 48) / 5))
+                maxHeight: 14
+                playing: card.media.playing
+            }
             GlassButton {
-                x: parent.width - Theme.pad - 32; y: 18; width: 32; height: 32
+                x: parent.width - Theme.pad - 32; y: (parent.height - height) / 2; width: 32; height: 32
                 icon: "play"; pose: card.media.playing ? "playing" : ""; iconSize: 14
                 enabled: card.available && card.media.canPlay
                 onClicked: card.command("toggle")
@@ -65,7 +112,19 @@ DockCard {
 
     detail: Component {
         Item {
-            Artwork { x: Theme.pad; y: Theme.pad; width: 76; height: 76; radius: 14; source: card.media.artwork || ""; opacity: card.reveal(0); transform: Translate { y: 8 * (1 - card.reveal(0)) } }
+            ArtBackdrop {
+                anchors.fill: parent
+                source: card.media.artwork || ""
+                sourceName: card.media.sourceName || ""
+                playing: card.available && card.media.playing
+            }
+            Item {
+                x: Theme.pad; y: Theme.pad; width: 76; height: 76
+                opacity: card.reveal(0); transform: Translate { y: 8 * (1 - card.reveal(0)) }
+                scale: (card.media.playing ? 1 : 0.94) + 0.03 * card.beat
+                RectangularShadow { anchors.fill: parent; radius: 14; blur: 20; offset.y: 6; spread: -2; color: "#99000000" }
+                Artwork { anchors.fill: parent; radius: 14; source: card.media.artwork || ""; tint: card.appTint }
+            }
             Column {
                 x: Theme.pad + 90; y: Theme.pad + 6; width: parent.width - x - Theme.pad; spacing: 4
                 opacity: card.reveal(1); transform: Translate { y: 8 * (1 - card.reveal(1)) }

@@ -148,6 +148,44 @@ class DemoExtras(QObject):
                 s["muted"] = not s["muted"]
         self.sessionsChanged.emit()
 
+    @Slot(str)
+    def resetApp(self, key):
+        for s in self._sessions:
+            if s["key"] == key:
+                s.update(volume=100, muted=False)
+        self.sessionsChanged.emit()
+
+    @Slot()
+    def resetAllApps(self):
+        for s in self._sessions:
+            s.update(volume=100, muted=False)
+        self.sessionsChanged.emit()
+
+
+class DemoMeter(QObject):
+    """A music-like level for previews: a beat with some wobble."""
+    levelChanged = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        import math
+        self._t = 0.0
+        self._level = 0.6
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._tick)
+        self._timer.start(33)
+        self._math = math
+
+    def _tick(self):
+        self._t += 0.033
+        beat = abs(self._math.sin(self._t * 3.6)) ** 3
+        self._level = 0.35 + 0.5 * beat + 0.08 * self._math.sin(self._t * 17)
+        self.levelChanged.emit()
+
+    @Property(float, notify=levelChanged)
+    def level(self):
+        return self._level
+
 
 class DemoSystem(QObject):
     changed = Signal()
