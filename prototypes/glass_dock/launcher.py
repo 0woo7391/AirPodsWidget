@@ -1,8 +1,10 @@
 """Quick-launch module: a short, user-curated list of apps, files or folders."""
 from __future__ import annotations
 
+import ctypes
 import json
 import os
+import sys
 from pathlib import Path
 
 from PySide6.QtCore import QFileInfo, QObject, Property, QSettings, QSize, QStandardPaths, QUrl, Signal, Slot, Qt
@@ -70,8 +72,19 @@ class LauncherBackend(QObject):
 
     @Slot(int)
     def launch(self, index: int) -> None:
-        if 0 <= index < len(self._apps):
+        if not 0 <= index < len(self._apps):
+            return
+        # The packaged dock points the DLL search path at its own folder (SetDllDirectory), and
+        # launched apps inherit it: they would load the dock's DLLs and lock its files. Launch
+        # with the default search path, then put the dock's back.
+        frozen = os.name == "nt" and getattr(sys, "frozen", False)
+        if frozen:
+            ctypes.windll.kernel32.SetDllDirectoryW(None)
+        try:
             QDesktopServices.openUrl(QUrl.fromLocalFile(self._apps[index]["path"]))
+        finally:
+            if frozen:
+                ctypes.windll.kernel32.SetDllDirectoryW(sys._MEIPASS)
 
     @Slot("QVariantList", result=int)
     def addUrls(self, urls) -> int:

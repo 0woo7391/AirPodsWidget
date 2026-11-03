@@ -38,7 +38,6 @@ from preview import LucianProvider  # noqa: E402
 from launcher import AppIconProvider, LauncherBackend  # noqa: E402
 from optical import IconMetrics  # noqa: E402
 from features import DockFeatures  # noqa: E402
-from notifications import NotificationWatcher  # noqa: E402
 from prefs import DockPrefs, screens_in_order  # noqa: E402
 
 WINDOW_WIDTH = 580   # dock column plus the flyout beside it
@@ -96,8 +95,8 @@ class DockView(QQuickView):
     gridChanged = Signal()
     nativeGlassChanged = Signal()
 
-    def __init__(self, audio, media, devices, launcher, features, prefs: DockPrefs, *, watcher=None,
-                 always_on_top=False, preview_backdrop=False):
+    def __init__(self, audio, media, devices, launcher, features, prefs: DockPrefs, *, always_on_top=False,
+                 preview_backdrop=False):
         super().__init__()
         self.setTitle("Glass Dock")
         self.prefs = prefs
@@ -128,7 +127,6 @@ class DockView(QQuickView):
         context.setContextProperty("deviceBackend", devices)
         context.setContextProperty("launcherBackend", launcher)
         context.setContextProperty("dockFeatures", features)
-        context.setContextProperty("notificationWatcher", watcher or NotificationWatcher(self))
         context.setContextProperty("previewBackdrop", preview_backdrop)
         self.setSource(QUrl.fromLocalFile(str(BASE / "qml" / "GlassDock.qml")))
         if self.status() == QQuickView.Error:
@@ -454,12 +452,10 @@ def capture(view: DockView, hub: IslandHub, settings_view: SettingsView, prefs: 
               ("rail", "", True, -1, 0, "right"), ("rail-open", "", True, 300, 1, "right"),
               ("rail-airpods", "airpods", True, -1, 0, "right"),
               ("left-summary", "", False, -1, -1, "left"), ("left-media", "media", False, -1, -1, "left"),
-              ("left-rail-open", "", True, 300, 1, "left"), ("raised-media", "media", False, -1, -1, "right"),
-              ("instagram", "instagram", False, -1, -1, "right")]
+              ("left-rail-open", "", True, 300, 1, "left"), ("raised-media", "media", False, -1, -1, "right")]
     pages = ["screen", "modules", "island", "airpods", "media", "general"]
     moments = [0.05, 0.3, 1.5, 3.5]
-    tones = [("connected", "연결됨"), ("low", "배터리 부족 · 왼쪽 15%"), ("disconnected", "연결 해제됨"),
-             ("message", "Instagram 새 메시지")]
+    tones = [("connected", "연결됨"), ("low", "배터리 부족 · 왼쪽 15%"), ("disconnected", "연결 해제됨")]
     shots = [(tone, sub, m) for tone, sub in tones for m in moments]
     hub.notify("AirPods Pro", "연결됨", "connected", list(devices.batteries))
     island = next(iter(hub.views.values())).view
@@ -501,8 +497,7 @@ def capture(view: DockView, hub: IslandHub, settings_view: SettingsView, prefs: 
             app.quit()
             return
         tone, sub, moment = shots[index]
-        title = "mika" if tone == "message" else "AirPods Pro"
-        island_root.show(title, sub, tone, [] if tone in ("disconnected", "message") else list(devices.batteries))
+        island_root.show("AirPods Pro", sub, tone, [] if tone == "disconnected" else list(devices.batteries))
         island_root.setProperty("forcedTime", moment)
         QTimer.singleShot(200, lambda: island_step(index + 1))
 
@@ -532,20 +527,13 @@ def main() -> int:
     usage_path = Path(tempfile.mkdtemp(prefix="glass-dock-usage-")) / "usage.json" if demo else None
     features = DockFeatures(devices, media, prefs, PROJECT / "assets" / "low_power_warning.mp3",
                             usage_path=usage_path)
-    watcher = NotificationWatcher()
-    watcher.message.connect(features.on_instagram)
-    watcher.replace_toasts = prefs.get("island/instagramReplace")
-    prefs.changed.connect(lambda key: setattr(watcher, "replace_toasts", prefs.get(key))
-                          if key == "island/instagramReplace" else None)
-    view = DockView(audio, media, devices, launcher, features, prefs, watcher=watcher, always_on_top=args.on_top,
+    view = DockView(audio, media, devices, launcher, features, prefs, always_on_top=args.on_top,
                     preview_backdrop=previewing)
     hub = IslandHub(view, prefs)
     features.notice.connect(hub.notify)
     actions = DockActions(view, hub, features, devices, app)
     settings_view = SettingsView(view, actions)
     if previewing:
-        for sender, content in (("jun", "사진을 보냈습니다"), ("mika", "오늘 저녁 어때?")):
-            watcher.add(sender, content)
         view.resize(WINDOW_WIDTH + 40, 760)
         view.show()
         code = capture(view, hub, settings_view, prefs, devices, app, args.capture)
@@ -561,12 +549,9 @@ def main() -> int:
     view.applyNativeGlass()
     view.followScreens(app)
     features.apply_startup()
-    if not demo:
-        watcher.start()
-        app.aboutToQuit.connect(watcher.stop)
     if demo:
         from demo_backends import demo_events
-        demo_timer = demo_events(devices, watcher)  # noqa: F841 - kept alive for the app's lifetime
+        demo_timer = demo_events(devices)  # noqa: F841 - kept alive for the app's lifetime
     tray = make_tray(view, settings_view, actions, prefs, app)
     for owner in (audio, media, devices):
         if hasattr(owner, "stop"):

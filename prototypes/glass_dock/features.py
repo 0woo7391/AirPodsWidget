@@ -73,17 +73,11 @@ class DockFeatures(QObject):
         processes = self.settings.value("system/gameProcesses", GAME_PROCESSES)
         return is_game_foreground(processes if isinstance(processes, list) else [processes])
 
-    def _notify(self, subtitle, tone, batteries, title=None):
+    def _notify(self, subtitle, tone, batteries):
         if self.get("island/suppressDuringGames") and self.game_active():
             return
-        self.notice.emit(title or self.devices.state.get("name") or "AirPods", subtitle, tone, batteries)
+        self.notice.emit(self.devices.state.get("name") or "AirPods", subtitle, tone, batteries)
 
-    @Slot(str, str)
-    def on_instagram(self, sender, content):
-        """An Instagram DM: the sender, and the message only when the settings allow it."""
-        if self.get("island/instagram"):
-            shown = content if self.get("island/instagramContent") and content else "Instagram 새 메시지"
-            self._notify(shown, "message", [], title=sender)
 
     # Connection and battery -------------------------------------------------
     def _on_device(self):

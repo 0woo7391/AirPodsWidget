@@ -26,9 +26,8 @@ Item {
     readonly property bool gridOn: !!grid && grid.cellW > 0
     readonly property real cellH: gridOn ? grid.cellH : 0
     readonly property real bentoWidth: column.bentoW
-    readonly property var cardsById: ({ airpods: airpods, media: media, volume: volume, output: output, launcher: launcher,
-                                        instagram: instagram })
-    readonly property var cards: [airpods, media, volume, output, launcher, instagram]
+    readonly property var cardsById: ({ airpods: airpods, media: media, volume: volume, output: output, launcher: launcher })
+    readonly property var cards: [airpods, media, volume, output, launcher]
     readonly property var order: dockPrefs.modules.filter(m => m.visible).map(m => m.id)
     readonly property string activeCard: {
         for (const card of cards) if (card.visible && card.expanded) return card.cardId
@@ -308,13 +307,6 @@ Item {
         }
         LauncherCard {
             id: launcher
-            dock: dock; railIndex: dock.order.indexOf(cardId)
-            visible: railIndex >= 0
-            x: column.place(cardId, "x"); y: column.place(cardId, "y"); width: column.place(cardId, "w")
-            dockLeft: column.x + x; dockTop: column.y + y
-        }
-        InstagramCard {
-            id: instagram
             dock: dock; railIndex: dock.order.indexOf(cardId)
             visible: railIndex >= 0
             x: column.place(cardId, "x"); y: column.place(cardId, "y"); width: column.place(cardId, "w")

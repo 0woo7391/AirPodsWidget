@@ -492,23 +492,6 @@ Rectangle {
                 SettingRow { label: "AirPods 연결 해제"; PrefToggle { key: "island/disconnect" } }
                 SettingRow { label: "배터리 부족"; PrefToggle { key: "island/lowBattery" } }
                 SettingRow {
-                    label: "Instagram DM"
-                    hint: "Windows 알림으로 오는 DM을 아일랜드로 띄웁니다. 인스타그램 앱이나, 브라우저에서 instagram.com 알림을 허용해 두어야 합니다. 상태: " + notificationWatcher.status
-                    PrefToggle { key: "island/instagram" }
-                }
-                SettingRow {
-                    visible: root.pref("island/instagram")
-                    label: "브라우저 알림 대신 아일랜드만"
-                    hint: "읽은 인스타 알림을 Windows 알림에서 지워 두 번 뜨지 않게 합니다. 브라우저 배너가 아주 잠깐 보일 수 있습니다."
-                    PrefToggle { key: "island/instagramReplace" }
-                }
-                SettingRow {
-                    visible: root.pref("island/instagram")
-                    label: "메시지 내용 보이기"
-                    hint: "끄면 보낸 사람만 보이고 내용은 \"Instagram 새 메시지\"로 가립니다."
-                    PrefToggle { key: "island/instagramContent" }
-                }
-                SettingRow {
                     label: "게임 중에는 숨기기"
                     hint: "League of Legends, VALORANT가 앞에 있을 때"
                     PrefToggle { key: "island/suppressDuringGames" }
