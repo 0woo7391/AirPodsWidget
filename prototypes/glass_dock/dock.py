@@ -97,7 +97,7 @@ class DockView(QQuickView):
     nativeGlassChanged = Signal()
 
     def __init__(self, audio, media, devices, launcher, features, prefs: DockPrefs, *, extras=None, system=None,
-                 meter=None, always_on_top=False, preview_backdrop=False):
+                 meter=None, ai=None, always_on_top=False, preview_backdrop=False):
         super().__init__()
         self.setTitle("Glass Dock")
         self.prefs = prefs
@@ -129,10 +129,11 @@ class DockView(QQuickView):
         context.setContextProperty("deviceBackend", devices)
         context.setContextProperty("launcherBackend", launcher)
         context.setContextProperty("dockFeatures", features)
-        from demo_backends import DemoExtras, DemoMeter, DemoSystem
+        from demo_backends import DemoAi, DemoExtras, DemoMeter, DemoSystem
         context.setContextProperty("audioExtras", extras if extras is not None else DemoExtras(self))
         context.setContextProperty("systemStatus", system if system is not None else DemoSystem(self))
         context.setContextProperty("audioMeter", meter if meter is not None else DemoMeter(self))
+        context.setContextProperty("aiStatus", ai if ai is not None else DemoAi(self))
         context.setContextProperty("previewBackdrop", preview_backdrop)
         self.setSource(QUrl.fromLocalFile(str(BASE / "qml" / "GlassDock.qml")))
         if self.status() == QQuickView.Error:
@@ -466,7 +467,7 @@ def capture(view: DockView, hub: IslandHub, settings_view: SettingsView, prefs: 
               ("left-rail-open", "", True, 300, 1, "left"), ("raised-media", "media", False, -1, -1, "right"),
               ("modules", "", False, -1, -1, "right"), ("volume-full", "volume", False, -1, -1, "right"),
               ("system", "system", False, -1, -1, "right"), ("memo", "memo", False, -1, -1, "right"),
-              ("clock-calendar", "clock", False, -1, -1, "right"),
+              ("clock-calendar", "clock", False, -1, -1, "right"), ("ai", "ai", False, -1, -1, "right"),
               ("editing", "", False, -1, -1, "right")]
     pages = ["screen", "modules", "island", "airpods", "media", "general"]
     moments = [0.05, 0.3, 1.5, 3.5]
@@ -492,8 +493,8 @@ def capture(view: DockView, hub: IslandHub, settings_view: SettingsView, prefs: 
             import json
             prefs.set("dock/modules", json.dumps(
                 [{"id": m, "visible": True, "size": s} for m, s in
-                 [("clock", "full"), ("mic", "half"), ("system", "half"), ("volume", "full"), ("memo", "full"),
-                  ("media", "full"), ("airpods", "full")]]))
+                 [("clock", "full"), ("mic", "half"), ("system", "half"), ("ai", "full"), ("volume", "full"),
+                  ("memo", "full"), ("media", "full")]]))
         root.setProperty("editing", name == "editing")
         root.setProperty("galleryOpen", name == "editing")
         view.resize(WINDOW_WIDTH + 40, 760)
@@ -552,17 +553,17 @@ def main() -> int:
     features = DockFeatures(devices, media, prefs, PROJECT / "assets" / "low_power_warning.mp3",
                             usage_path=usage_path)
     if demo:
-        from demo_backends import DemoExtras, DemoMeter, DemoSystem
-        extras, system, meter = DemoExtras(), DemoSystem(), DemoMeter()
+        from demo_backends import DemoAi, DemoExtras, DemoMeter, DemoSystem
+        extras, system, meter, ai = DemoExtras(), DemoSystem(), DemoMeter(), DemoAi()
     else:
+        from ai_status import AiStatus
         from audio_extras import AudioExtras, AudioMeter
         from system_status import SystemStatus
-        extras, system, meter = AudioExtras(), SystemStatus(), AudioMeter()
-        extras.start()
-        system.start()
-        meter.start()
+        extras, system, meter, ai = AudioExtras(), SystemStatus(), AudioMeter(), AiStatus()
+        for backend in (extras, system, meter, ai):
+            backend.start()
     extras.micToggled.connect(features.on_mic)
-    view = DockView(audio, media, devices, launcher, features, prefs, extras=extras, system=system, meter=meter,
+    view = DockView(audio, media, devices, launcher, features, prefs, extras=extras, system=system, meter=meter, ai=ai,
                     always_on_top=args.on_top, preview_backdrop=previewing)
     hub = IslandHub(view, prefs)
     features.notice.connect(hub.notify)
@@ -588,7 +589,7 @@ def main() -> int:
         from demo_backends import demo_events
         demo_timer = demo_events(devices)  # noqa: F841 - kept alive for the app's lifetime
     tray = make_tray(view, settings_view, actions, prefs, app)
-    for owner in (audio, media, devices, extras, system, meter):
+    for owner in (audio, media, devices, extras, system, meter, ai):
         if hasattr(owner, "stop"):
             app.aboutToQuit.connect(owner.stop)
     app.aboutToQuit.connect(tray.hide)

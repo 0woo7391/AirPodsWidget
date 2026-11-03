@@ -175,3 +175,45 @@ def test_cpu_percent_from_idle_and_busy_time():
     from system_status import cpu_percent
     assert cpu_percent((100, 1000), (150, 1100)) == 50     # 50 of 100 ticks idle
     assert cpu_percent((100, 1000), (100, 1000)) == 0      # no time passed
+
+
+def test_codex_limits_read_from_the_session_log(tmp_path):
+    import json, time
+    from ai_status import codex_limits
+    now = time.time()
+    entry = {"type": "event_msg", "payload": {"rate_limits": {
+        "primary": {"used_percent": 42.0, "window_minutes": 300, "resets_at": now + 3600},
+        "secondary": {"used_percent": 99.0, "window_minutes": 10080, "resets_at": now - 60}}}}
+    log = tmp_path / "rollout.jsonl"
+    log.write_text(json.dumps({"type": "other"}) + "\n" + json.dumps(entry) + "\n", encoding="utf-8")
+    limits = codex_limits(log, now)["limits"]
+    assert [(l["label"], l["used"]) for l in limits] == [("5시간", 42), ("주간", 0)]   # the weekly window rolled over
+    assert codex_limits(None)["limits"] == []
+
+
+def test_claude_tokens_count_each_reply_once(tmp_path):
+    import json, time
+    from datetime import datetime, timezone
+    from ai_status import claude_today
+    project = tmp_path / "proj"
+    project.mkdir()
+    stamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    line = lambda mid, out: json.dumps({"timestamp": stamp, "message": {"id": mid, "usage": {
+        "input_tokens": 10, "output_tokens": out, "cache_creation_input_tokens": 5, "cache_read_input_tokens": 999}}})
+    (project / "s.jsonl").write_text("\n".join([line("a", 1), line("a", 20), line("b", 100)]) + "\n", encoding="utf-8")
+    assert claude_today(tmp_path, time.time())["tokens"] == (10 + 20 + 5) + (10 + 100 + 5)
+
+
+def test_claude_limits_read_from_the_status_line_save(tmp_path):
+    import json
+    import time
+    from ai_status import claude_limits
+    now = time.time()
+    saved = tmp_path / "claude_limits.json"
+    saved.write_text("﻿" + json.dumps({"five_hour": {"used_percentage": 37.4, "resets_at": now - 60},
+                                              "seven_day": {"used_percentage": 81, "resets_at": now + 3600}}),
+                     encoding="utf-8")
+    limits = claude_limits(saved, now)["limits"]
+    assert [(l["label"], l["used"]) for l in limits] == [("5시간", 0), ("주간", 81)]   # the 5-hour one rolled over
+    assert limits[1]["resetsAt"] == (now + 3600) * 1000
+    assert claude_limits(tmp_path / "missing.json")["limits"] == []

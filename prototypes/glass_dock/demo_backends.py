@@ -198,6 +198,35 @@ class DemoSystem(QObject):
         return dict(cpu=23, memory=41, memoryUsed=13.1, memoryTotal=31.9, ping=6)
 
 
+class DemoAi(QObject):
+    """Sample assistants for previews (no logos: the cards fall back to their layout)."""
+    changed = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        import time
+        now = time.time() * 1000
+        self._items = [
+            dict(id="codex", name="Codex", logo="", unread=1, tokens=0, lastUsed=0, asOf=now - 3600e3,
+                 limits=[dict(label="5시간", used=42, resetsAt=now + 2.2 * 3600e3, window=300),
+                         dict(label="주간", used=91, resetsAt=now + 26 * 3600e3, window=10080)]),
+            dict(id="claude", name="Claude", logo="", unread=0, tokens=1_106_086, lastUsed=now - 120e3, asOf=now - 300e3,
+                 limits=[dict(label="5시간", used=63, resetsAt=now + 1.5 * 3600e3, window=300),
+                         dict(label="주간", used=28, resetsAt=now + 4 * 86400e3, window=10080)]),
+        ]
+
+    @Property("QVariantList", notify=changed)
+    def assistants(self):
+        return [dict(i) for i in self._items]
+
+    @Slot(str)
+    def openApp(self, assistant_id):
+        for item in self._items:
+            if item["id"] == assistant_id:
+                item["unread"] = 0
+        self.changed.emit()
+
+
 DEMO_APPS = [
     dict(name="Chrome", path="C:/Program Files/Google/Chrome/Application/chrome.exe"),
     dict(name="Discord", path="C:/Users/demo/AppData/Local/Discord/Update.exe"),

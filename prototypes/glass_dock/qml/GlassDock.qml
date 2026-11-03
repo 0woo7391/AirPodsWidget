@@ -27,8 +27,8 @@ Item {
     readonly property real cellH: gridOn ? grid.cellH : 0
     readonly property real bentoWidth: column.bentoW
     readonly property var cardsById: ({ airpods: airpods, media: media, volume: volume, output: output, launcher: launcher,
-                                        clock: clock, memo: memo, mic: mic, system: system })
-    readonly property var cards: [airpods, media, volume, output, launcher, clock, memo, mic, system]
+                                        clock: clock, memo: memo, mic: mic, system: system, ai: ai })
+    readonly property var cards: [airpods, media, volume, output, launcher, clock, memo, mic, system, ai]
     function moduleOf(id) { return dockPrefs.modules.find(m => m.id === id) }
     function sizeOf(id) { const m = moduleOf(id); return m ? m.size : "full" }
     function sizesOf(id) { const m = moduleOf(id); return m ? m.sizes : ["full"] }
@@ -41,9 +41,12 @@ Item {
     FrameAnimation { running: dock.editing; onTriggered: dock.wobbleClock += frameTime }
     onEditingChanged: { galleryOpen = false; scheduleMask() }
     onGalleryOpenChanged: scheduleMask()
+    // While editing, the column's top stays put so reordering never shifts the whole dock.
+    property real editY: 0
     function startEditing() {
         if (dockHost.minimized) dockPrefs.set("dock/minimized", false)   // edit the cards, not the rail
         openCard = ""
+        editY = column.y
         editing = true
         dockHost.requestActivate()                                        // for Esc
     }
@@ -51,27 +54,30 @@ Item {
     Connections { target: dockHost; function onEditRequested() { dock.startEditing() } }
     Shortcut { sequence: "Esc"; enabled: dock.editing; onActivated: dock.stopEditing() }
     function removeCard(id) { dockPrefs.setModuleVisible(id, false) }
-    // Reorder while a card is dragged: it goes before the first other card whose middle
-    // lies below the pointer (or to its right, within a row of half cards).
-    property real lastMove: 0
+    // Reorder while a card is dragged. Every place it could go is laid out for real and
+    // the one whose slot sits nearest the dragged card wins; it moves only when that slot
+    // is clearly nearer than where it is now, so it never flip-flops at an edge.
     function dragTo(card, p) {
         const others = order.filter(id => id !== card.cardId)
-        let index = others.length
-        for (let i = 0; i < others.length; i++) {
-            const c = cardsById[others[i]]
-            const top = column.y + c.y, middle = top + c.cellHeight / 2
-            const sameRow = p.y >= top && p.y <= top + c.cellHeight
-            if (p.y < middle - c.cellHeight / 4 || (sameRow && c.size === "half" && p.x < column.x + c.x + c.width / 2)) {
-                index = i
-                break
-            }
+        const cx = p.x - card.grabOffset.x + card.width / 2
+        const cy = p.y - card.grabOffset.y + card.cellHeight / 2
+        const distanceAt = (index) => {
+            const ids = others.slice(0, index).concat([card.cardId], others.slice(index))
+            const slot = column.layoutFor(ids).bento[card.cardId]
+            return Math.hypot(column.x + slot.x + slot.w / 2 - cx, column.y + slot.y + card.cellHeight / 2 - cy)
         }
-        if (index === order.indexOf(card.cardId) || Date.now() - lastMove < 160) return   // no flip-flop at an edge
+        const current = order.indexOf(card.cardId)
+        const here = distanceAt(current)
+        let index = current, best = here
+        for (let i = 0; i <= others.length; i++) {
+            const d = distanceAt(i)
+            if (d < best) { best = d; index = i }
+        }
+        if (index === current || best + 14 > here) return
         const all = dockPrefs.modules.map(m => m.id)
-        const current = all.indexOf(card.cardId)
+        const from = all.indexOf(card.cardId)
         let target = index < others.length ? all.indexOf(others[index]) : all.indexOf(others[others.length - 1]) + 1
-        if (target > current) target -= 1
-        lastMove = Date.now()
+        if (target > from) target -= 1
         dockPrefs.moveModuleTo(card.cardId, target)
     }
     function endDrag(card) { scheduleMask() }
@@ -267,10 +273,12 @@ Item {
         // Cell rectangles for both layouts. Bento: modules in order, full width,
         // except that volume and output share a row when they are next to each other.
         // Rail: all stacked. Rail x/width follow the widening labels.
-        readonly property var layout: {
-            const bento = {}, rail = {}
+        readonly property var layout: layoutFor(dock.order)
+        // A half card with no half neighbour keeps its half width on the outer side,
+        // leaving an empty half slot (shown while editing) instead of stretching.
+        function layoutFor(ids) {
+            const bento = {}, rail = {}, gaps = []
             let y = 0, r = 0
-            const ids = dock.order
             for (let i = 0; i < ids.length; i++) {
                 const id = ids[i], card = dock.cardsById[id]
                 const next = ids[i + 1]
@@ -286,12 +294,18 @@ Item {
                     i++
                     continue
                 }
-                bento[id] = { x: 0, y: y, w: bentoW }
+                if (dock.sizeOf(id) === "half") {
+                    bento[id] = { x: dock.mirrored ? 0 : half + gapBento, y: y, w: half }
+                    gaps.push({ x: dock.mirrored ? half + gapBento : 0, y: y, w: half, h: card.cellHeight })
+                } else {
+                    bento[id] = { x: 0, y: y, w: bentoW }
+                }
                 y += card.cellHeight + gapBento
                 rail[id] = { y: r }
                 r += card.cellHeight + gapRail
             }
-            return { bento: bento, rail: rail, bentoHeight: Math.max(0, y - gapBento), railHeight: Math.max(0, r - gapRail) }
+            return { bento: bento, rail: rail, gaps: gaps, bentoHeight: Math.max(0, y - gapBento),
+                     railHeight: Math.max(0, r - gapRail) }
         }
         function place(id, key) {
             const b = layout.bento[id], r = layout.rail[id]
@@ -318,12 +332,28 @@ Item {
             return dock.grid.y + 5 + Math.max(0, Math.min(dock.grid.rows - blockRows, row)) * dock.cellH
         }
         readonly property real restY: dock.gridOn && !dock.rail ? rowY(wantY) : Math.max(minY, Math.min(maxY, wantY))
-        y: grip.held ? dock.rubber(wantY, minY, maxY) : restY
+        y: dock.editing ? dock.editY : grip.held ? dock.rubber(wantY, minY, maxY) : restY
         scale: 1 + 0.02 * dock.dragLift
         transformOrigin: dock.mirrored ? Item.Left : Item.Right
         onYChanged: if (!(dock.railness > 0 && dock.railness < 1) && !dock.moving) dock.scheduleMask()
         onHeightChanged: if (!(dock.railness > 0 && dock.railness < 1)) dock.scheduleMask()
 
+        Repeater {
+            model: dock.editing && !dock.rail ? column.layout.gaps : []
+            Rectangle {
+                required property var modelData
+                x: modelData.x; y: modelData.y; width: modelData.w; height: modelData.h
+                radius: Theme.radius
+                color: "#0AFFFFFF"
+                border.width: 1.5; border.color: "#33FFFFFF"
+                Text {
+                    anchors.centerIn: parent
+                    text: "여기에\n놓기"
+                    horizontalAlignment: Text.AlignHCenter
+                    color: Theme.inkTertiary; font.family: dockFont; font.pixelSize: 10
+                }
+            }
+        }
         AirPodsCard {
             id: airpods
             dock: dock; railIndex: dock.order.indexOf(cardId)
@@ -382,6 +412,13 @@ Item {
         }
         SystemCard {
             id: system
+            dock: dock; railIndex: dock.order.indexOf(cardId)
+            visible: railIndex >= 0
+            x: column.place(cardId, "x"); y: column.place(cardId, "y"); width: column.place(cardId, "w")
+            dockLeft: column.x + x; dockTop: column.y + y
+        }
+        AiCard {
+            id: ai
             dock: dock; railIndex: dock.order.indexOf(cardId)
             visible: railIndex >= 0
             x: column.place(cardId, "x"); y: column.place(cardId, "y"); width: column.place(cardId, "w")
