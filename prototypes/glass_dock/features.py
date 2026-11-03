@@ -73,10 +73,16 @@ class DockFeatures(QObject):
         processes = self.settings.value("system/gameProcesses", GAME_PROCESSES)
         return is_game_foreground(processes if isinstance(processes, list) else [processes])
 
-    def _notify(self, subtitle, tone, batteries):
+    def _notify(self, subtitle, tone, batteries, title=None):
         if self.get("island/suppressDuringGames") and self.game_active():
             return
-        self.notice.emit(self.devices.state.get("name") or "AirPods", subtitle, tone, batteries)
+        self.notice.emit(title or self.devices.state.get("name") or "AirPods", subtitle, tone, batteries)
+
+    @Slot(bool)
+    def on_mic(self, muted):
+        """The microphone was switched (from the dock, a hotkey or another app)."""
+        if self.get("island/mic"):
+            self._notify("꺼짐" if muted else "켜짐", "micOff" if muted else "micOn", [], title="마이크")
 
 
     # Connection and battery -------------------------------------------------

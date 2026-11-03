@@ -107,6 +107,59 @@ class DemoDevices(QObject):
         self.changed.emit()
 
 
+class DemoExtras(QObject):
+    """Sample microphone and per-app volumes with the AudioExtras surface."""
+    micChanged = Signal()
+    sessionsChanged = Signal()
+    micToggled = Signal(bool)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._mic = dict(available=True, name="마이크 (Realtek Audio)", muted=False)
+        self._sessions = [dict(key="spotify", path="C:/demo/Spotify.exe", name="Spotify", active=True, volume=70, muted=False),
+                          dict(key="discord", path="C:/demo/Discord.exe", name="Discord", active=True, volume=100, muted=False),
+                          dict(key="chrome", path="C:/demo/chrome.exe", name="Google Chrome", active=False, volume=45, muted=True)]
+
+    @Property("QVariantMap", notify=micChanged)
+    def mic(self):
+        return dict(self._mic)
+
+    @Property("QVariantList", notify=sessionsChanged)
+    def sessions(self):
+        return [dict(s) for s in self._sessions]
+
+    @Slot()
+    def toggleMic(self):
+        self._mic["muted"] = not self._mic["muted"]
+        self.micChanged.emit()
+        self.micToggled.emit(self._mic["muted"])
+
+    @Slot(str, int)
+    def setAppVolume(self, key, value):
+        for s in self._sessions:
+            if s["key"] == key:
+                s["volume"] = int(value)
+        self.sessionsChanged.emit()
+
+    @Slot(str)
+    def toggleAppMute(self, key):
+        for s in self._sessions:
+            if s["key"] == key:
+                s["muted"] = not s["muted"]
+        self.sessionsChanged.emit()
+
+
+class DemoSystem(QObject):
+    changed = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+    @Property("QVariantMap", notify=changed)
+    def state(self):
+        return dict(cpu=23, memory=41, memoryUsed=13.1, memoryTotal=31.9, ping=6)
+
+
 DEMO_APPS = [
     dict(name="Chrome", path="C:/Program Files/Google/Chrome/Application/chrome.exe"),
     dict(name="Discord", path="C:/Users/demo/AppData/Local/Discord/Update.exe"),

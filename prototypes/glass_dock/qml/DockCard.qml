@@ -41,6 +41,22 @@ Item {
         ? Math.max(1, Math.ceil((summaryHeight + 10) / dock.cellH)) * dock.cellH - 10 : summaryHeight
     readonly property real cellHeight: bentoHeight + (railHeight - bentoHeight) * railness
     readonly property alias hovered: hover.hovered
+    // "half" pairs with a neighbouring half card, "full" spans the dock (dockPrefs.modules).
+    readonly property string size: dock ? dock.sizeOf(cardId) : "full"
+    readonly property var sizes: dock ? dock.sizesOf(cardId) : ["full"]
+    // A card can hold its flyout open (the memo while typing).
+    property bool pinned: false
+
+    // ---- edit mode (dock.editing): wobble, remove, resize, drag to reorder ----
+    readonly property bool editing: !!dock && dock.editing
+    readonly property bool dragging: editDrag.active
+    // Pointer position in dock coordinates while dragged, and where on the card it grabbed.
+    property point dragPoint: Qt.point(0, 0)
+    property point grabOffset: Qt.point(0, 0)
+    z: dragging ? 50 : 0
+    Behavior on x { enabled: card.editing && !card.dragging; NumberAnimation { duration: 240; easing.type: Easing.OutCubic } }
+    Behavior on y { enabled: card.editing && !card.dragging; NumberAnimation { duration: 240; easing.type: Easing.OutCubic } }
+    rotation: editing && !dragging ? 0.8 * Math.sin(2 * Math.PI * (dock.wobbleClock * 2.2 + railIndex * 0.37)) : 0
 
     readonly property bool expanded: expandable && !!dock
         && (dock.forcedCard.length ? dock.forcedCard === cardId : dock.openCard === cardId)
@@ -68,7 +84,7 @@ Item {
 
     // Cursor magnification: the cell nearest the pointer swells the most.
     readonly property real magnifyTarget: {
-        if (!magnifies || !dock || dock.pointerY < 0 || dock.activeCard.length) return 0
+        if (!magnifies || !dock || dock.pointerY < 0 || dock.activeCard.length || editing) return 0
         // A widened rail is a list, not a dock: its rows stay level once the labels are out.
         const peak = (Theme.magnifyCard + (Theme.magnifyRail - Theme.magnifyCard) * railness) * (1 - railOpen * railness)
         return peak * Theme.magnify(dock.pointerY - (dockTop + cellHeight / 2), Theme.magnifyReach)
@@ -87,14 +103,23 @@ Item {
             origin.x: card.mirrored ? 0 : card.width; origin.y: card.cellHeight / 2
             xScale: 1 + card.magnifyAmount; yScale: 1 + card.magnifyAmount
         },
-        Translate { y: card.dock ? card.followY - card.dock.columnY : 0 }
+        Translate { y: card.dock ? card.followY - card.dock.columnY : 0 },
+        // Held under the pointer while dragged in edit mode, wherever the layout has moved its slot.
+        Translate {
+            x: card.dragging ? card.dragPoint.x - card.grabOffset.x - card.dockLeft : 0
+            y: card.dragging ? card.dragPoint.y - card.grabOffset.y - card.dockTop : 0
+        },
+        Scale {
+            origin.x: card.width / 2; origin.y: card.cellHeight / 2
+            xScale: card.dragging ? 1.04 : 1; yScale: xScale
+        }
     ]
 
     GlassSurface {
         anchors.fill: parent
         radius: Theme.radius - (Theme.radius - 16) * card.railness
         lit: hover.hovered || card.expanded
-        lift: card.dock ? 0.7 * card.dock.dragLift : 0
+        lift: card.dock ? Math.max(0.7 * card.dock.dragLift, card.dragging ? 1 : 0) : 0
     }
     // The open card's rim glows toward the flyout, tying the two together.
     Rectangle {
@@ -117,7 +142,7 @@ Item {
             sourceComponent: card.summary
             opacity: 1 - card.railness
             visible: opacity > 0
-            enabled: !card.rail
+            enabled: !card.rail && !card.editing
         }
         Loader {
             width: card.width
@@ -136,8 +161,67 @@ Item {
     }
     // On the rail, hovering only widens the labels; a click opens the detail.
     TapHandler {
-        enabled: card.rail && card.expandable && !card.expanded && !!card.dock
+        enabled: card.rail && card.expandable && !card.expanded && !!card.dock && !card.editing
         onTapped: card.dock.openNow(card.cardId)
+    }
+    // Hold a card, or right-click it, to edit the dock (like a phone's home screen).
+    TapHandler {
+        enabled: !!card.dock && !card.editing
+        acceptedButtons: Qt.LeftButton | Qt.RightButton
+        longPressThreshold: 0.6
+        onLongPressed: card.dock.startEditing()
+        onTapped: function(point, button) { if (button === Qt.RightButton) card.dock.startEditing() }
+    }
+    DragHandler {
+        id: editDrag
+        enabled: card.editing
+        target: null
+        onActiveChanged: {
+            if (active) {
+                card.grabOffset = Qt.point(centroid.pressPosition.x, centroid.pressPosition.y)
+                card.dragPoint = Qt.point(centroid.scenePosition.x, centroid.scenePosition.y)   // the dock is the scene root
+            } else {
+                card.dock.endDrag(card)
+            }
+        }
+        onCentroidChanged: if (active) {
+            card.dragPoint = Qt.point(centroid.scenePosition.x, centroid.scenePosition.y)
+            card.dock.dragTo(card, card.dragPoint)
+        }
+    }
+
+    // Edit-mode controls: remove (top corner) and, for two-size modules, resize.
+    Rectangle {
+        z: 5
+        width: 22; height: 22; radius: 11
+        x: card.mirrored ? card.width - width + 6 : -6; y: -6
+        color: "#E6303038"
+        border.width: 1; border.color: Theme.strokeLit
+        opacity: card.editing && !card.dragging ? 1 : 0
+        scale: card.editing ? 1 : 0.6
+        visible: opacity > 0
+        Behavior on opacity { NumberAnimation { duration: 160 } }
+        Behavior on scale { NumberAnimation { duration: 200; easing.type: Easing.OutBack } }
+        Rectangle { anchors.centerIn: parent; width: 10; height: 2; radius: 1; color: Theme.ink }
+        TapHandler { onTapped: card.dock.removeCard(card.cardId) }
+    }
+    Rectangle {
+        z: 5
+        readonly property string other: card.sizes.length > 1 ? card.sizes[(card.sizes.indexOf(card.size) + 1) % card.sizes.length] : ""
+        width: sizeText.implicitWidth + 16; height: 22; radius: 11
+        x: card.mirrored ? 6 : card.width - width - 6; y: card.cellHeight - height - 6
+        color: "#E6303038"
+        border.width: 1; border.color: Theme.strokeLit
+        opacity: card.editing && !card.dragging && other.length ? 1 : 0
+        visible: opacity > 0
+        Behavior on opacity { NumberAnimation { duration: 160 } }
+        Text {
+            id: sizeText
+            anchors.centerIn: parent
+            text: parent.other === "half" ? "작게" : "크게"
+            color: Theme.ink; font.family: dockFont; font.pixelSize: 10; font.weight: Font.DemiBold
+        }
+        TapHandler { onTapped: dockPrefs.setModuleSize(card.cardId, parent.other) }
     }
 
     Component {

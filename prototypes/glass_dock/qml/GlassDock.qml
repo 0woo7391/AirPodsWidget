@@ -26,8 +26,55 @@ Item {
     readonly property bool gridOn: !!grid && grid.cellW > 0
     readonly property real cellH: gridOn ? grid.cellH : 0
     readonly property real bentoWidth: column.bentoW
-    readonly property var cardsById: ({ airpods: airpods, media: media, volume: volume, output: output, launcher: launcher })
-    readonly property var cards: [airpods, media, volume, output, launcher]
+    readonly property var cardsById: ({ airpods: airpods, media: media, volume: volume, output: output, launcher: launcher,
+                                        clock: clock, memo: memo, mic: mic, mixer: mixer, system: system })
+    readonly property var cards: [airpods, media, volume, output, launcher, clock, memo, mic, mixer, system]
+    function moduleOf(id) { return dockPrefs.modules.find(m => m.id === id) }
+    function sizeOf(id) { const m = moduleOf(id); return m ? m.size : "full" }
+    function sizesOf(id) { const m = moduleOf(id); return m ? m.sizes : ["full"] }
+
+    // ---- edit mode: like a phone's home screen. Cards wobble; drag to reorder, "−" to
+    // remove, "+" for the gallery of hidden modules, "완료" (or Esc) to finish. ----
+    property bool editing: false
+    property bool galleryOpen: false
+    property real wobbleClock: 0
+    FrameAnimation { running: dock.editing; onTriggered: dock.wobbleClock += frameTime }
+    onEditingChanged: { galleryOpen = false; scheduleMask() }
+    onGalleryOpenChanged: scheduleMask()
+    function startEditing() {
+        if (dockHost.minimized) dockPrefs.set("dock/minimized", false)   // edit the cards, not the rail
+        openCard = ""
+        editing = true
+        dockHost.requestActivate()                                        // for Esc
+    }
+    function stopEditing() { editing = false }
+    Connections { target: dockHost; function onEditRequested() { dock.startEditing() } }
+    Shortcut { sequence: "Esc"; enabled: dock.editing; onActivated: dock.stopEditing() }
+    function removeCard(id) { dockPrefs.setModuleVisible(id, false) }
+    // Reorder while a card is dragged: it goes before the first other card whose middle
+    // lies below the pointer (or to its right, within a row of half cards).
+    property real lastMove: 0
+    function dragTo(card, p) {
+        const others = order.filter(id => id !== card.cardId)
+        let index = others.length
+        for (let i = 0; i < others.length; i++) {
+            const c = cardsById[others[i]]
+            const top = column.y + c.y, middle = top + c.cellHeight / 2
+            const sameRow = p.y >= top && p.y <= top + c.cellHeight
+            if (p.y < middle - c.cellHeight / 4 || (sameRow && c.size === "half" && p.x < column.x + c.x + c.width / 2)) {
+                index = i
+                break
+            }
+        }
+        if (index === order.indexOf(card.cardId) || Date.now() - lastMove < 160) return   // no flip-flop at an edge
+        const all = dockPrefs.modules.map(m => m.id)
+        const current = all.indexOf(card.cardId)
+        let target = index < others.length ? all.indexOf(others[index]) : all.indexOf(others[others.length - 1]) + 1
+        if (target > current) target -= 1
+        lastMove = Date.now()
+        dockPrefs.moveModuleTo(card.cardId, target)
+    }
+    function endDrag(card) { scheduleMask() }
     readonly property var order: dockPrefs.modules.filter(m => m.visible).map(m => m.id)
     readonly property string activeCard: {
         for (const card of cards) if (card.visible && card.expanded) return card.cardId
@@ -60,6 +107,7 @@ Item {
         return false
     }
     function cardHover(card, on) {
+        if (editing) return
         if (on) {
             if (!card.expandable) {
                 pendingCard = ""; openTimer.stop(); switchTimer.stop()
@@ -92,7 +140,7 @@ Item {
             const inside = (r) => p.x >= r.x - 12 && p.x <= r.x + r.width + 12 && p.y >= r.y - 12 && p.y <= r.y + r.height + 12
             const over = inside(Qt.rect(column.x, column.y - 30, column.width, column.height + 30))
                 || (flyout.visible && inside(Qt.rect(flyout.x, flyout.y, flyout.width, flyout.height)))
-            misses = over ? 0 : misses + 1
+            misses = over || (dock.shownCard && dock.shownCard.pinned) ? 0 : misses + 1
             if (misses >= 2) { dock.openCard = ""; dock.pendingCard = ""; misses = 0 }
         }
     }
@@ -103,7 +151,7 @@ Item {
     }
     Timer {
         id: closeTimer; interval: Theme.hoverCloseDelay
-        onTriggered: if (!flyoutHover.hovered && !dock.anyCardHovered()) dock.openCard = ""
+        onTriggered: if (!flyoutHover.hovered && !dock.anyCardHovered() && !(dock.shownCard && dock.shownCard.pinned)) dock.openCard = ""
     }
 
     // ---- input mask -------------------------------------------------------------
@@ -111,7 +159,7 @@ Item {
     function pushMask() {
         // Moving or morphing: open the column's whole vertical band so nothing is clipped
         // mid-motion; the tight shape comes back once it has settled.
-        const morphing = railness > 0 && railness < 1 || moving
+        const morphing = railness > 0 && railness < 1 || moving || editing
         const widest = rail && (pointer.hovered || railOpen > 0) ? Theme.railWidth + Theme.railLabelWidth : column.width
         const w = morphing ? Math.max(column.bentoW, widest) : widest
         const top = morphing ? 0 : column.y - 24        // the grip sits above the column
@@ -120,7 +168,7 @@ Item {
         // Outset so magnified cells, antialiased rims and the lifted shadow are never clipped.
         const pad = moving ? 40 : 10
         const rects = [[left - pad, top - 6, w + 2 * pad, h + 12]]
-        if (activeCard.length || flyout.visible) {
+        if (activeCard.length || flyout.visible || galleryOpen) {
             // The flyout's whole lane, so it can slide between cards without reshaping the window.
             const laneLeft = mirrored ? column.x + column.width : column.x - Theme.detailWidth - 60
             rects.push([laneLeft, 0, Theme.detailWidth + 60, height])
@@ -220,14 +268,13 @@ Item {
         // except that volume and output share a row when they are next to each other.
         // Rail: all stacked. Rail x/width follow the widening labels.
         readonly property var layout: {
-            const halves = ["volume", "output"]
             const bento = {}, rail = {}
             let y = 0, r = 0
             const ids = dock.order
             for (let i = 0; i < ids.length; i++) {
                 const id = ids[i], card = dock.cardsById[id]
                 const next = ids[i + 1]
-                if (halves.indexOf(id) >= 0 && next && halves.indexOf(next) >= 0) {
+                if (dock.sizeOf(id) === "half" && next && dock.sizeOf(next) === "half") {
                     const other = dock.cardsById[next]
                     bento[id] = { x: 0, y: y, w: half }
                     bento[next] = { x: half + gapBento, y: y, w: half }
@@ -312,6 +359,41 @@ Item {
             x: column.place(cardId, "x"); y: column.place(cardId, "y"); width: column.place(cardId, "w")
             dockLeft: column.x + x; dockTop: column.y + y
         }
+        ClockCard {
+            id: clock
+            dock: dock; railIndex: dock.order.indexOf(cardId)
+            visible: railIndex >= 0
+            x: column.place(cardId, "x"); y: column.place(cardId, "y"); width: column.place(cardId, "w")
+            dockLeft: column.x + x; dockTop: column.y + y
+        }
+        MemoCard {
+            id: memo
+            dock: dock; railIndex: dock.order.indexOf(cardId)
+            visible: railIndex >= 0
+            x: column.place(cardId, "x"); y: column.place(cardId, "y"); width: column.place(cardId, "w")
+            dockLeft: column.x + x; dockTop: column.y + y
+        }
+        MicCard {
+            id: mic
+            dock: dock; railIndex: dock.order.indexOf(cardId)
+            visible: railIndex >= 0
+            x: column.place(cardId, "x"); y: column.place(cardId, "y"); width: column.place(cardId, "w")
+            dockLeft: column.x + x; dockTop: column.y + y
+        }
+        MixerCard {
+            id: mixer
+            dock: dock; railIndex: dock.order.indexOf(cardId)
+            visible: railIndex >= 0
+            x: column.place(cardId, "x"); y: column.place(cardId, "y"); width: column.place(cardId, "w")
+            dockLeft: column.x + x; dockTop: column.y + y
+        }
+        SystemCard {
+            id: system
+            dock: dock; railIndex: dock.order.indexOf(cardId)
+            visible: railIndex >= 0
+            x: column.place(cardId, "x"); y: column.place(cardId, "y"); width: column.place(cardId, "w")
+            dockLeft: column.x + x; dockTop: column.y + y
+        }
     }
 
     // ---- drag grip: move the dock up and down its edge --------------------------
@@ -328,7 +410,8 @@ Item {
         x: column.x + (column.width - width) / 2
         // Above the dock, or below it when the dock rests on the top row.
         y: column.y - height - 4 >= 0 ? column.y - height - 4 : column.y + column.height + 4
-        opacity: dragging ? 1 : gripHover.hovered ? 0.95 : pointer.hovered ? 0.5 : 0
+        opacity: dock.editing ? 0 : dragging ? 1 : gripHover.hovered ? 0.95 : pointer.hovered ? 0.5 : 0
+        enabled: !dock.editing
         Behavior on opacity { NumberAnimation { duration: 160 } }
         Rectangle {
             anchors.centerIn: parent
@@ -366,6 +449,99 @@ Item {
                 }
             }
             onActiveTranslationChanged: grip.dragPosition = grip.startPosition + activeTranslation.y / dock.height
+        }
+    }
+
+    // ---- edit-mode chrome ----------------------------------------------------------
+    component Pill: Rectangle {
+        id: pill
+        property string label
+        property bool accent: false
+        signal clicked()
+        width: pillText.implicitWidth + 28; height: 28; radius: 14
+        color: accent ? Theme.ink : pillMouse.containsMouse ? "#F2303038" : "#E6262630"
+        border.width: accent ? 0 : 1; border.color: Theme.strokeLit
+        Text {
+            id: pillText
+            anchors.centerIn: parent
+            text: pill.label
+            color: pill.accent ? "#16161A" : Theme.ink
+            font.family: dockFont; font.pixelSize: 12; font.weight: Font.DemiBold
+        }
+        MouseArea { id: pillMouse; anchors.fill: parent; hoverEnabled: true; onClicked: pill.clicked() }
+    }
+    Pill {
+        label: "완료"; accent: true
+        x: column.x + column.width - width
+        y: Math.max(4, column.y - height - 8)
+        opacity: dock.editing ? 1 : 0; visible: opacity > 0
+        Behavior on opacity { NumberAnimation { duration: 180 } }
+        onClicked: dock.stopEditing()
+    }
+    Pill {
+        id: plus
+        label: dock.galleryOpen ? "닫기" : "＋ 모듈 추가"
+        x: column.x + (column.width - width) / 2
+        y: Math.min(dock.height - height - 4, column.y + column.height + 10)
+        opacity: dock.editing ? 1 : 0; visible: opacity > 0
+        Behavior on opacity { NumberAnimation { duration: 180 } }
+        onClicked: dock.galleryOpen = !dock.galleryOpen
+    }
+    // Modules not on the dock; pick a size to add one (it lands after the last card).
+    Item {
+        id: gallery
+        readonly property var hidden: dockPrefs.modules.filter(m => !m.visible)
+        width: Theme.detailWidth
+        height: 52 + Math.max(1, hidden.length) * 46 + 8
+        x: dock.mirrored ? column.x + column.width + 12 : column.x - 12 - width
+        y: Math.max(10, Math.min(dock.height - height - 10, plus.y + plus.height - height))
+        opacity: dock.galleryOpen ? 1 : 0
+        scale: 0.94 + 0.06 * opacity
+        transformOrigin: dock.mirrored ? Item.Left : Item.Right
+        visible: opacity > 0
+        Behavior on opacity { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
+        GlassSurface { anchors.fill: parent; lifted: true; lift: gallery.opacity }
+        Text {
+            x: Theme.pad; y: Theme.pad
+            text: "모듈 추가"
+            color: Theme.ink; font.family: dockFont; font.pixelSize: 15; font.weight: Font.DemiBold
+        }
+        Text {
+            visible: gallery.hidden.length === 0
+            x: Theme.pad; y: 52
+            text: "모든 모듈이 dock에 있습니다."
+            color: Theme.inkSecondary; font.family: dockFont; font.pixelSize: 12
+        }
+        Column {
+            x: 8; y: 46; width: parent.width - 16; spacing: 2
+            Repeater {
+                model: gallery.hidden
+                Rectangle {
+                    id: galleryRow
+                    required property var modelData
+                    width: parent.width; height: 44; radius: Theme.radiusInner
+                    color: rowHover.hovered ? Theme.well : "transparent"
+                    HoverHandler { id: rowHover }
+                    Text {
+                        x: 10; anchors.verticalCenter: parent.verticalCenter
+                        text: modelData.name
+                        color: Theme.ink; font.family: dockFont; font.pixelSize: 13; font.weight: Font.DemiBold
+                    }
+                    Row {
+                        anchors.right: parent.right; anchors.rightMargin: 6
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: 6
+                        Repeater {
+                            model: modelData.sizes
+                            Pill {
+                                required property string modelData
+                                label: modelData === "half" ? "작게 추가" : "크게 추가"
+                                onClicked: dockPrefs.addModule(galleryRow.modelData.id, modelData)
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 

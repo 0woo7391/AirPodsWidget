@@ -149,13 +149,29 @@ def test_in_ear_holds_through_the_gap_between_advertisements(tmp_path):
     assert [(b["inEar"], b["quality"]) for b in backend.batteries[:2]] == [(False, "cached")] * 2
 
 
-def test_module_order_and_visibility(tmp_path):
+def test_module_order_visibility_and_size(tmp_path):
     prefs = DockPrefs(QSettings(str(tmp_path / "dock.ini"), QSettings.IniFormat))
-    assert [m["id"] for m in prefs.modules] == ["airpods", "media", "volume", "output", "launcher"]
+    shown = [m["id"] for m in prefs.modules if m["visible"]]
+    assert shown == ["airpods", "media", "volume", "output", "launcher"]
     prefs.moveModule("launcher", -10)
     prefs.setModuleVisible("media", False)
     assert [(m["id"], m["visible"]) for m in prefs.modules][:3] == [("launcher", True), ("airpods", True),
                                                                      ("media", False)]
-    for module in ["airpods", "launcher", "volume", "output"]:
+    prefs.addModule("clock", "full")                     # from the gallery: after the last visible card
+    shown = [m["id"] for m in prefs.modules if m["visible"]]
+    assert shown[-1] == "clock" and next(m for m in prefs.modules if m["id"] == "clock")["size"] == "full"
+    prefs.setModuleSize("clock", "half")
+    prefs.setModuleSize("airpods", "half")               # AirPods has no half size: ignored
+    sizes = {m["id"]: m["size"] for m in prefs.modules}
+    assert sizes["clock"] == "half" and sizes["airpods"] == "full"
+    prefs.moveModuleTo("clock", 0)
+    assert prefs.modules[0]["id"] == "clock"
+    for module in [m["id"] for m in prefs.modules]:
         prefs.setModuleVisible(module, False)
     assert any(m["visible"] for m in prefs.modules)  # the last visible module cannot be hidden
+
+
+def test_cpu_percent_from_idle_and_busy_time():
+    from system_status import cpu_percent
+    assert cpu_percent((100, 1000), (150, 1100)) == 50     # 50 of 100 ticks idle
+    assert cpu_percent((100, 1000), (100, 1000)) == 0      # no time passed

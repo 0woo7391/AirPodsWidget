@@ -398,30 +398,14 @@ Rectangle {
         Column {
             Section {
                 title: "카드"
-                Repeater {
-                    model: dockPrefs.modules
-                    SettingRow {
-                        required property var modelData
-                        required property int index
-                        label: modelData.name
-                        hint: modelData.id === "volume" || modelData.id === "output" ? "볼륨과 출력 장치가 이웃하면 한 줄에 나란히 놓입니다." : ""
-                        Row {
-                            spacing: 6
-                            GlassButton {
-                                text: "위로"; enabled: index > 0
-                                onClicked: dockPrefs.moveModule(modelData.id, -1)
-                            }
-                            GlassButton {
-                                text: "아래로"; enabled: index < dockPrefs.modules.length - 1
-                                onClicked: dockPrefs.moveModule(modelData.id, 1)
-                            }
-                            Toggle {
-                                anchors.verticalCenter: parent.verticalCenter
-                                checked: modelData.visible
-                                onToggled: function(value) { dockPrefs.setModuleVisible(modelData.id, value) }
-                            }
-                        }
-                    }
+                SettingRow {
+                    label: "dock 편집"
+                    hint: "dock에서 카드를 길게 누르거나 우클릭해도 들어갑니다. 끌어서 순서를 바꾸고, −로 빼고, + 모듈 추가로 넣습니다."
+                    GlassButton { text: "편집 시작"; accent: true; onClicked: dockActions.editDock() }
+                }
+                SettingRow {
+                    label: "지금 dock에 있는 카드"
+                    hint: dockPrefs.modules.filter(m => m.visible).map(m => m.name).join(" · ")
                 }
             }
             Section {
@@ -491,6 +475,7 @@ Rectangle {
                 SettingRow { label: "AirPods 연결"; PrefToggle { key: "island/connect" } }
                 SettingRow { label: "AirPods 연결 해제"; PrefToggle { key: "island/disconnect" } }
                 SettingRow { label: "배터리 부족"; PrefToggle { key: "island/lowBattery" } }
+                SettingRow { label: "마이크 켜짐·꺼짐"; PrefToggle { key: "island/mic" } }
                 SettingRow {
                     label: "게임 중에는 숨기기"
                     hint: "League of Legends, VALORANT가 앞에 있을 때"

@@ -21,7 +21,7 @@ Item {
 
     property string title: ""
     property string subtitle: ""
-    property string tone: "connected"   // connected | disconnected | low
+    property string tone: "connected"   // connected | disconnected | low | micOn | micOff
     property var batteries: []          // [{label, value, charging}] for L, R, case
 
     // Seconds since the notification appeared; driven by the frame clock.
@@ -47,7 +47,8 @@ Item {
     readonly property real contentOpacity: Theme.seg(t, 0.16, 0.36) * (1 - Theme.seg(t, closeAt, closeAt + 0.12))
     // The same status colours as the dock's dots.
     readonly property color accent: tone === "low" ? Theme.warn : tone === "disconnected" ? Theme.inkTertiary
-        : Theme.good
+        : tone === "micOff" ? Theme.bad : Theme.good
+    readonly property bool micTone: tone === "micOn" || tone === "micOff"
 
     function levelColor(part) {
         return part.charging ? Theme.charge : part.value <= 10 ? Theme.bad : part.value <= 20 ? Theme.warn : Theme.good
@@ -126,7 +127,8 @@ Item {
                     DockIcon {
                         anchors.centerIn: parent
                         size: 30
-                        name: "headphones"
+                        name: island.micTone ? "microphone" : "headphones"
+                        pose: island.tone === "micOff" ? "muted" : ""
                         color: island.tone === "disconnected" ? Theme.inkSecondary : Theme.ink
                     }
                 }
@@ -165,7 +167,7 @@ Item {
                     y: parent.height / 2 + 20 - baselineOffset
                     text: island.subtitle
                     elide: Text.ElideRight
-                    color: island.tone === "low" ? Theme.warn : Theme.inkSecondary
+                    color: island.tone === "low" ? Theme.warn : island.tone === "micOff" ? Theme.bad : Theme.inkSecondary
                     font.family: dockFont
                     font.pixelSize: 18
                     font.weight: Font.Medium

@@ -109,6 +109,24 @@ class LauncherBackend(QObject):
             self._save()
 
 
+class ExeIconProvider(QQuickImageProvider):
+    """image://exeicon/<url-encoded path> — a program's own icon, for the per-app volume module."""
+
+    def __init__(self):
+        super().__init__(QQuickImageProvider.Image)
+
+    def requestImage(self, request: str, size: QSize, requested_size: QSize) -> QImage:
+        from urllib.parse import unquote
+        side = requested_size.width() if requested_size.width() > 0 else 32
+        image = extract_icon(unquote(request), side)
+        if image.isNull():   # no icon to show: a blank, so the card simply has no picture
+            image = QImage(side, side, QImage.Format_ARGB32_Premultiplied)
+            image.fill(Qt.transparent)
+        size.setWidth(image.width())
+        size.setHeight(image.height())
+        return image
+
+
 class AppIconProvider(QQuickImageProvider):
     """image://appicon/<index> — the shell icon of a launcher entry; empty when unavailable."""
 

@@ -35,7 +35,7 @@ for path in (CONCEPT, PROTOTYPES / "glass_audio_widget", PROJECT / "src", BASE):
     sys.path.insert(0, str(path))
 
 from preview import LucianProvider  # noqa: E402
-from launcher import AppIconProvider, LauncherBackend  # noqa: E402
+from launcher import AppIconProvider, ExeIconProvider, LauncherBackend  # noqa: E402
 from optical import IconMetrics  # noqa: E402
 from features import DockFeatures  # noqa: E402
 from prefs import DockPrefs, screens_in_order  # noqa: E402
@@ -90,13 +90,14 @@ def load_fonts() -> str:
 
 class DockView(QQuickView):
     alwaysOnTopChanged = Signal()
+    editRequested = Signal()
     minimizedChanged = Signal()
     edgeChanged = Signal()
     gridChanged = Signal()
     nativeGlassChanged = Signal()
 
-    def __init__(self, audio, media, devices, launcher, features, prefs: DockPrefs, *, always_on_top=False,
-                 preview_backdrop=False):
+    def __init__(self, audio, media, devices, launcher, features, prefs: DockPrefs, *, extras=None, system=None,
+                 always_on_top=False, preview_backdrop=False):
         super().__init__()
         self.setTitle("Glass Dock")
         self.prefs = prefs
@@ -115,6 +116,7 @@ class DockView(QQuickView):
         self.metrics = IconMetrics(self.icons, self)
         self.engine().addImageProvider("lucian", self.icons)
         self.engine().addImageProvider("appicon", AppIconProvider(launcher))
+        self.engine().addImageProvider("exeicon", ExeIconProvider())
         self.qml_warnings: list[str] = []
         self.engine().warnings.connect(lambda issues: self.qml_warnings.extend(i.toString() for i in issues))
         context = self.rootContext()
@@ -127,6 +129,9 @@ class DockView(QQuickView):
         context.setContextProperty("deviceBackend", devices)
         context.setContextProperty("launcherBackend", launcher)
         context.setContextProperty("dockFeatures", features)
+        from demo_backends import DemoExtras, DemoSystem
+        context.setContextProperty("audioExtras", extras if extras is not None else DemoExtras(self))
+        context.setContextProperty("systemStatus", system if system is not None else DemoSystem(self))
         context.setContextProperty("previewBackdrop", preview_backdrop)
         self.setSource(QUrl.fromLocalFile(str(BASE / "qml" / "GlassDock.qml")))
         if self.status() == QQuickView.Error:
@@ -357,6 +362,10 @@ class DockActions(QObject):
                         list(self.devices.batteries))
 
     @Slot()
+    def editDock(self):
+        self.dock.editRequested.emit()
+
+    @Slot()
     def playAlert(self):
         self.features.play_alert()
 
@@ -408,6 +417,7 @@ def make_tray(view: DockView, settings_view: SettingsView, actions: DockActions,
         menu.addAction(action)
         switches.append((key, action))
     prefs.changed.connect(lambda key: [a.setChecked(prefs.get(k)) for k, a in switches if k == key])
+    menu.addAction("dock 편집").triggered.connect(actions.editDock)
     menu.addAction("아일랜드 미리 보기").triggered.connect(actions.previewIsland)
     menu.addSeparator()
     menu.addAction("종료").triggered.connect(app.quit)
@@ -452,7 +462,10 @@ def capture(view: DockView, hub: IslandHub, settings_view: SettingsView, prefs: 
               ("rail", "", True, -1, 0, "right"), ("rail-open", "", True, 300, 1, "right"),
               ("rail-airpods", "airpods", True, -1, 0, "right"),
               ("left-summary", "", False, -1, -1, "left"), ("left-media", "media", False, -1, -1, "left"),
-              ("left-rail-open", "", True, 300, 1, "left"), ("raised-media", "media", False, -1, -1, "right")]
+              ("left-rail-open", "", True, 300, 1, "left"), ("raised-media", "media", False, -1, -1, "right"),
+              ("modules", "", False, -1, -1, "right"), ("mixer", "mixer", False, -1, -1, "right"),
+              ("system", "system", False, -1, -1, "right"), ("memo", "memo", False, -1, -1, "right"),
+              ("editing", "", False, -1, -1, "right")]
     pages = ["screen", "modules", "island", "airpods", "media", "general"]
     moments = [0.05, 0.3, 1.5, 3.5]
     tones = [("connected", "연결됨"), ("low", "배터리 부족 · 왼쪽 15%"), ("disconnected", "연결 해제됨")]
@@ -472,6 +485,15 @@ def capture(view: DockView, hub: IslandHub, settings_view: SettingsView, prefs: 
         _, card, rail, pointer_y, rail_open, edge = states[index]
         prefs.set("dock/edge", edge)
         prefs.set("dock/position", 0.2 if states[index][0].startswith("raised") else 0.5)
+        name = states[index][0]
+        if name == "modules":   # every new module on show, in both sizes
+            import json
+            prefs.set("dock/modules", json.dumps(
+                [{"id": m, "visible": True, "size": s} for m, s in
+                 [("clock", "full"), ("mic", "half"), ("system", "half"), ("mixer", "full"), ("memo", "full"),
+                  ("airpods", "full"), ("volume", "half"), ("clock", "half")]]))
+        root.setProperty("editing", name == "editing")
+        root.setProperty("galleryOpen", name == "editing")
         view.resize(WINDOW_WIDTH + 40, 760)
         view.setMinimized(rail)
         root.setProperty("forcedCard", card)
@@ -527,8 +549,18 @@ def main() -> int:
     usage_path = Path(tempfile.mkdtemp(prefix="glass-dock-usage-")) / "usage.json" if demo else None
     features = DockFeatures(devices, media, prefs, PROJECT / "assets" / "low_power_warning.mp3",
                             usage_path=usage_path)
-    view = DockView(audio, media, devices, launcher, features, prefs, always_on_top=args.on_top,
-                    preview_backdrop=previewing)
+    if demo:
+        from demo_backends import DemoExtras, DemoSystem
+        extras, system = DemoExtras(), DemoSystem()
+    else:
+        from audio_extras import AudioExtras
+        from system_status import SystemStatus
+        extras, system = AudioExtras(), SystemStatus()
+        extras.start()
+        system.start()
+    extras.micToggled.connect(features.on_mic)
+    view = DockView(audio, media, devices, launcher, features, prefs, extras=extras, system=system,
+                    always_on_top=args.on_top, preview_backdrop=previewing)
     hub = IslandHub(view, prefs)
     features.notice.connect(hub.notify)
     actions = DockActions(view, hub, features, devices, app)
@@ -553,7 +585,7 @@ def main() -> int:
         from demo_backends import demo_events
         demo_timer = demo_events(devices)  # noqa: F841 - kept alive for the app's lifetime
     tray = make_tray(view, settings_view, actions, prefs, app)
-    for owner in (audio, media, devices):
+    for owner in (audio, media, devices, extras, system):
         if hasattr(owner, "stop"):
             app.aboutToQuit.connect(owner.stop)
     app.aboutToQuit.connect(tray.hide)
