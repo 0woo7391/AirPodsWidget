@@ -97,7 +97,7 @@ class DockView(QQuickView):
     nativeGlassChanged = Signal()
 
     def __init__(self, audio, media, devices, launcher, features, prefs: DockPrefs, *, extras=None, system=None,
-                 meter=None, ai=None, always_on_top=False, preview_backdrop=False):
+                 meter=None, ai=None, events=None, always_on_top=False, preview_backdrop=False):
         super().__init__()
         self.setTitle("Glass Dock")
         self.prefs = prefs
@@ -134,6 +134,13 @@ class DockView(QQuickView):
         context.setContextProperty("systemStatus", system if system is not None else DemoSystem(self))
         context.setContextProperty("audioMeter", meter if meter is not None else DemoMeter(self))
         context.setContextProperty("aiStatus", ai if ai is not None else DemoAi(self))
+        if events is None:
+            from events import EventStore
+            events = EventStore(Path(tempfile.mkdtemp(prefix="glass-dock-events-")) / "events.json", self, start=False)
+        context.setContextProperty("eventStore", events)
+        from memo_format import MemoFormat
+        self.memo_format = MemoFormat(self)
+        context.setContextProperty("memoFormat", self.memo_format)
         context.setContextProperty("previewBackdrop", preview_backdrop)
         self.setSource(QUrl.fromLocalFile(str(BASE / "qml" / "GlassDock.qml")))
         if self.status() == QQuickView.Error:
@@ -293,9 +300,9 @@ class IslandView:
             x = area.center().x() - view.width() // 2
         view.setPosition(QPoint(x, area.top() + offset))
 
-    def notify(self, title, subtitle, tone, batteries):
+    def notify(self, title, subtitle, tone, batteries, mark=""):
         self.view.show()
-        self.view.rootObject().show(title, subtitle, tone, batteries)
+        self.view.rootObject().show(title, subtitle, tone, batteries, mark)
 
 
 class IslandHub(QObject):
@@ -315,7 +322,7 @@ class IslandHub(QObject):
             island.view.setSource(QUrl())
             island.view.deleteLater()
 
-    def notify(self, title, subtitle, tone, batteries=None):
+    def notify(self, title, subtitle, tone, batteries=None, mark=""):
         align = self.prefs.get("island/align")
         offset = self.prefs.get("island/offset")
         for screen in self.prefs.island_screens():
@@ -323,7 +330,12 @@ class IslandHub(QObject):
             if island is None:
                 island = self.views[screen] = IslandView(self.dock)
             island.place(screen, align, offset)
-            island.notify(title, subtitle, tone, batteries or [])
+            island.notify(title, subtitle, tone, batteries or [], mark)
+
+    @Slot(str, str, str)
+    def remind(self, title, subtitle, color):
+        """A calendar reminder: the event's title and when, marked in its colour."""
+        self.notify(title, subtitle, "event", [], color)
 
     def close(self):
         for island in self.views.values():
@@ -522,7 +534,7 @@ def capture(view: DockView, hub: IslandHub, settings_view: SettingsView, prefs: 
             app.quit()
             return
         tone, sub, moment = shots[index]
-        island_root.show("AirPods Pro", sub, tone, [] if tone == "disconnected" else list(devices.batteries))
+        island_root.show("AirPods Pro", sub, tone, [] if tone == "disconnected" else list(devices.batteries), "")
         island_root.setProperty("forcedTime", moment)
         QTimer.singleShot(200, lambda: island_step(index + 1))
 
@@ -563,10 +575,17 @@ def main() -> int:
         for backend in (extras, system, meter, ai):
             backend.start()
     extras.micToggled.connect(features.on_mic)
+    from events import EventStore
+    if demo:
+        from demo_backends import demo_calendar
+        events = demo_calendar(Path(tempfile.mkdtemp(prefix="glass-dock-events-")) / "events.json")
+    else:
+        events = EventStore(Path(prefs.settings.fileName()).parent / "events.json")
     view = DockView(audio, media, devices, launcher, features, prefs, extras=extras, system=system, meter=meter, ai=ai,
-                    always_on_top=args.on_top, preview_backdrop=previewing)
+                    events=events, always_on_top=args.on_top, preview_backdrop=previewing)
     hub = IslandHub(view, prefs)
     features.notice.connect(hub.notify)
+    events.reminder.connect(hub.remind)
     actions = DockActions(view, hub, features, devices, app)
     settings_view = SettingsView(view, actions)
     if previewing:
@@ -589,7 +608,7 @@ def main() -> int:
         from demo_backends import demo_events
         demo_timer = demo_events(devices)  # noqa: F841 - kept alive for the app's lifetime
     tray = make_tray(view, settings_view, actions, prefs, app)
-    for owner in (audio, media, devices, extras, system, meter, ai):
+    for owner in (audio, media, devices, extras, system, meter, ai, events):
         if hasattr(owner, "stop"):
             app.aboutToQuit.connect(owner.stop)
     app.aboutToQuit.connect(tray.hide)

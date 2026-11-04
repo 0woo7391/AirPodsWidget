@@ -1,9 +1,13 @@
 """AI assistants for the AI module: usage left, reply alerts, open the app.
 
 Codex: its own session logs (~/.codex/sessions) carry the 5-hour and weekly rate
-limits (used %, reset time); the newest one is read. Claude: Claude Code hands the same
-two limits only to its status line, so claude_statusline.ps1 saves them to
-claude_limits.json; today's tokens come from its logs (~/.claude/projects). Reply alerts: a new Windows notification from the app's package adds a red
+limits (used %, reset time); the newest session that has them is read. Claude: the same
+two limits come from Anthropic's usage page, asked with the Claude login already on this PC
+(~/.claude/.credentials.json, the user agreed to it); the token goes only to
+api.anthropic.com and is never shown, logged or saved. When that fails, the limits Claude
+Code hands its status line (claude_statusline.ps1 saves them to claude_limits.json) are
+used. Today's tokens come from its logs (~/.claude/projects). Reply alerts: a new Windows
+notification from the app's package adds a red
 dot until the app is opened from the dock. Opening uses the Store app's identity, so
 an open window comes to the front and a closed app starts.
 """
@@ -17,6 +21,8 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.error
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -29,12 +35,15 @@ ASSISTANTS = [
 ]
 LIMIT_NAMES = {300: "5시간", 10080: "주간"}
 CLAUDE_LIMITS = Path(os.environ.get("LOCALAPPDATA", HOME)) / "GlassDock" / "claude_limits.json"
+CLAUDE_CREDENTIALS = HOME / ".claude" / ".credentials.json"
+CLAUDE_USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
+ONLINE_REFRESH_SECONDS = 180
 FILE_REFRESH_SECONDS = 20
 POLL_SECONDS = 1.0
 
 
-def newest_codex_session(root: Path = HOME / ".codex" / "sessions") -> Path | None:
-    """Sessions live in year/month/day folders; walk the newest ones first."""
+def codex_sessions(root: Path = HOME / ".codex" / "sessions"):
+    """Session logs, newest first; they live in year/month/day folders."""
     def newest_dirs(folder: Path):
         try:
             return sorted((p for p in folder.iterdir() if p.is_dir()), reverse=True)
@@ -43,10 +52,19 @@ def newest_codex_session(root: Path = HOME / ".codex" / "sessions") -> Path | No
     for year in newest_dirs(root):
         for month in newest_dirs(year):
             for day in newest_dirs(month):
-                files = sorted(day.glob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)
-                if files:
-                    return files[0]
-    return None
+                yield from sorted(day.glob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)
+
+
+def latest_codex_limits(root: Path = HOME / ".codex" / "sessions", now: float | None = None, look_back: int = 40) -> dict:
+    """The limits of the newest session that has any: a session opened without a turn
+    (or while out of usage) logs none."""
+    for index, path in enumerate(codex_sessions(root)):
+        if index >= look_back:
+            break
+        result = codex_limits(path, now)
+        if result["limits"]:
+            return result
+    return dict(limits=[], asOf=0)
 
 
 def codex_limits(path: Path | None, now: float | None = None) -> dict:
@@ -89,6 +107,41 @@ def claude_limits(path: Path = CLAUDE_LIMITS, now: float | None = None) -> dict:
         as_of = path.stat().st_mtime * 1000
     except (OSError, ValueError):
         return dict(limits=[], asOf=0)
+    limits = _claude_windows(data, now, "used_percentage")
+    return dict(limits=limits, asOf=as_of if limits else 0)
+
+
+def claude_usage(credentials: Path = CLAUDE_CREDENTIALS, now: float | None = None) -> dict:
+    """{limits, asOf(ms), note} from Anthropic's usage page, with the Claude login on this PC.
+
+    note: "" when read, "nologin" (no login file), "expired" (the login needs renewing:
+    left to Claude itself, since renewing here would sign Claude Code out), "offline".
+    The token is sent to api.anthropic.com only, and never printed or kept.
+    """
+    now = time.time() if now is None else now
+    try:
+        oauth = json.loads(credentials.read_text(encoding="utf-8"))["claudeAiOauth"]
+        token = oauth["accessToken"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return dict(limits=[], asOf=0, note="nologin")
+    if oauth.get("expiresAt") and oauth["expiresAt"] / 1000 < now:
+        return dict(limits=[], asOf=0, note="expired")
+    request = urllib.request.Request(CLAUDE_USAGE_URL, headers={
+        "Authorization": "Bearer " + token, "anthropic-beta": "oauth-2025-04-20",
+        "Content-Type": "application/json", "User-Agent": "GlassDock"})
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            data = json.loads(response.read())
+    except urllib.error.HTTPError as error:
+        return dict(limits=[], asOf=0, note="expired" if error.code in (401, 403) else "offline")
+    except (OSError, ValueError):
+        return dict(limits=[], asOf=0, note="offline")
+    limits = _claude_windows(data, now, "utilization")
+    return dict(limits=limits, asOf=now * 1000 if limits else 0, note="" if limits else "offline")
+
+
+def _claude_windows(data, now: float, field: str) -> list:
+    """The 5-hour and weekly windows of a Claude usage answer, `field` holding the used %."""
     limits = []
     for key, window in (("five_hour", 300), ("seven_day", 10080)):
         part = data.get(key) if isinstance(data, dict) else None
@@ -101,11 +154,11 @@ def claude_limits(path: Path = CLAUDE_LIMITS, now: float | None = None) -> dict:
             except ValueError:
                 resets = 0
         resets = float(resets)
-        used = float(part.get("used_percentage") or 0)
-        if resets and resets < now:          # rolled over since Claude Code last ran
+        used = float(part.get(field) or 0)
+        if resets and resets < now:          # rolled over since it was read
             used, resets = 0.0, 0
         limits.append(dict(label=LIMIT_NAMES[window], used=round(used), resetsAt=resets * 1000, window=window))
-    return dict(limits=limits, asOf=as_of if limits else 0)
+    return limits
 
 
 def claude_today(root: Path = HOME / ".claude" / "projects", now: float | None = None) -> dict:
@@ -214,9 +267,13 @@ class AiStatus(QObject):
         for item in ASSISTANTS:
             logo = app_logo(item["package"])
             self._update.emit((item["id"], dict(installed=bool(logo), logo=logo)))
+        online, asked = dict(limits=[], asOf=0, note="nologin"), 0.0
         while True:
-            self._update.emit(("codex", codex_limits(newest_codex_session())))
-            self._update.emit(("claude", dict(claude_today(), **claude_limits())))
+            self._update.emit(("codex", latest_codex_limits()))
+            if time.time() - asked >= ONLINE_REFRESH_SECONDS:
+                online, asked = claude_usage(), time.time()
+            limits = online if online["limits"] else dict(claude_limits(), note=online["note"])
+            self._update.emit(("claude", dict(claude_today(), **limits)))
             if self._stop.wait(FILE_REFRESH_SECONDS):
                 return
 

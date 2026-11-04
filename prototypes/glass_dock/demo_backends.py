@@ -227,6 +227,20 @@ class DemoAi(QObject):
         self.changed.emit()
 
 
+def demo_calendar(path):
+    """An event store with a few sample events around today (reminders off, so previews stay quiet)."""
+    from datetime import date, timedelta
+    from events import EventStore
+    store = EventStore(path, start=False)
+    today = date.today()
+    for days, length, time, title, color in [(0, 1, "14:30", "디자인 리뷰", 0), (0, 1, "19:00", "운동", 1),
+                                             (1, 1, "", "엄마 생일", 3), (3, 1, "10:00", "치과", 2),
+                                             (-1, 4, "", "출장", 2), (9, 5, "", "여행", 4), (10, 2, "", "워크숍", 1)]:
+        store.save(dict(date=(today + timedelta(days=days)).isoformat(), end=(today + timedelta(days=days + length - 1)).isoformat(),
+                        time=time, title=title, color=store.colors[color], remind=-1))
+    return store
+
+
 DEMO_APPS = [
     dict(name="Chrome", path="C:/Program Files/Google/Chrome/Application/chrome.exe"),
     dict(name="Discord", path="C:/Users/demo/AppData/Local/Discord/Update.exe"),

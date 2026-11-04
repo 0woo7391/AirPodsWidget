@@ -10,16 +10,18 @@ DockCard {
     summaryHeight: 84
 
     readonly property var items: aiStatus.assistants || []
-    // Each block: name row, then 33 px per limit bar, the Claude token lines, the "as of" line.
+    // A first guess of the flyout's height (name row, 33 px per limit bar, the note lines); the
+    // open flyout then takes the height its blocks really have.
     function blockHeight(item) {
         const limits = (item.limits || []).length
-        return 36 + limits * 33 + (item.id === "claude" ? (limits ? 22 : 36) : 0) + (item.asOf > 0 ? 20 : 0)
+        return 36 + limits * 33 + (item.id === "claude" ? (limits ? 22 : 40) : limits ? 0 : 18) + (item.asOf > 0 ? 20 : 0)
     }
     detailHeight: 52 + Math.max(1, items.length) * 12 + items.reduce((sum, i) => sum + blockHeight(i), 0)
 
     property real now: Date.now()
     Timer { interval: 30000; repeat: true; running: true; onTriggered: card.now = Date.now() }
-    // The limit to watch: the most used one (a week at 99 % matters more than 5 hours at 0 %).
+    // Shown as what is left, like the apps' own usage pages ("5시간 100% 남음").
+    // The limit to watch: the one with least left (a week at 1 % matters more than 5 hours at 100 %).
     function main(item) {
         const limits = item.limits || []
         return limits.length ? limits.reduce((a, b) => (b.used > a.used ? b : a)) : null
@@ -36,16 +38,18 @@ DockCard {
             : Math.floor(s / 86400) + "일 전"
     }
     function tokens(n) { return n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? Math.round(n / 1e3) + "K" : n }
-    function usageColor(used) { return used >= 90 ? Theme.bad : used >= 70 ? Theme.warn : Theme.good }
+    function leftOf(limit) { return Math.max(0, 100 - limit.used) }
+    function leftColor(left) { return left <= 10 ? Theme.bad : left <= 30 ? Theme.warn : Theme.good }
     function line(item) {
         const limit = card.main(item)
-        return limit ? limit.label + " " + limit.used + "% · " + card.until(limit.resetsAt)
-                     : "오늘 " + card.tokens(item.tokens) + " 토큰 · " + card.ago(item.lastUsed)
+        return limit ? limit.label + " " + card.leftOf(limit) + "% 남음 · " + card.until(limit.resetsAt)
+            : item.id === "claude" ? "오늘 " + card.tokens(item.tokens) + " 토큰 · " + card.ago(item.lastUsed)
+            : "한도 기록 없음"
     }
 
     railIcon: "grid"
     railLabel: "AI"
-    railStatus: items.map(i => i.name + (card.main(i) ? " " + card.main(i).used + "%" : "")).join(" · ")
+    railStatus: items.map(i => i.name + (card.main(i) ? " " + card.leftOf(card.main(i)) + "% 남음" : "")).join(" · ")
     railDot: items.some(i => i.unread > 0) ? Theme.bad : "transparent"
 
     // A logo with an optional usage ring and the reply dot.
@@ -72,11 +76,11 @@ DockCard {
                 PathAngleArc { centerX: logo.size / 2; centerY: logo.size / 2; radiusX: logo.size / 2 - 1.5; radiusY: radiusX; startAngle: 0; sweepAngle: 360 }
             }
             ShapePath {
-                strokeColor: logo.limit ? card.usageColor(logo.limit.used) : "transparent"
+                strokeColor: logo.limit ? card.leftColor(card.leftOf(logo.limit)) : "transparent"
                 strokeWidth: 2.5; fillColor: "transparent"; capStyle: ShapePath.RoundCap
                 PathAngleArc {
                     centerX: logo.size / 2; centerY: logo.size / 2; radiusX: logo.size / 2 - 1.5; radiusY: radiusX
-                    startAngle: -90; sweepAngle: logo.limit ? 3.6 * logo.limit.used : 0
+                    startAngle: -90; sweepAngle: logo.limit ? 3.6 * card.leftOf(logo.limit) : 0
                 }
             }
         }
@@ -119,8 +123,8 @@ DockCard {
                             Meter {
                                 visible: card.main(modelData) !== null
                                 width: parent.width; height: 3
-                                value: card.main(modelData) ? card.main(modelData).used : 0
-                                fill: card.main(modelData) ? card.usageColor(card.main(modelData).used) : Theme.ink
+                                value: card.main(modelData) ? card.leftOf(card.main(modelData)) : 0
+                                fill: card.main(modelData) ? card.leftColor(card.leftOf(card.main(modelData))) : Theme.ink
                             }
                         }
                         TapHandler { enabled: !card.editing; onTapped: aiStatus.openApp(modelData.id) }
@@ -160,14 +164,16 @@ DockCard {
                 opacity: card.reveal(0)
             }
             Column {
+                id: blocks
                 x: Theme.pad; y: 50; width: parent.width - Theme.pad * 2; spacing: 12
+                onHeightChanged: if (height > 0) card.detailHeight = y + height + Theme.pad
                 Repeater {
                     model: card.items
                     Item {
                         id: block
                         required property var modelData
                         required property int index
-                        width: parent.width; height: card.blockHeight(modelData)
+                        width: parent.width; height: 36 + info.height
                         opacity: card.reveal(1 + index); transform: Translate { y: 8 * (1 - card.reveal(1 + index)) }
                         Logo { item: block.modelData; size: 28; ring: false }
                         Text {
@@ -175,39 +181,52 @@ DockCard {
                             text: block.modelData.name + (block.modelData.unread ? "  · 새 답변 " + block.modelData.unread : "")
                             color: Theme.ink; font.family: dockFont; font.pixelSize: 13; font.weight: Font.DemiBold
                         }
+                        // Open the app, on the name row.
+                        GlassButton {
+                            anchors.right: parent.right; y: 0
+                            height: 28
+                            text: "열기"; accent: true
+                            onClicked: aiStatus.openApp(block.modelData.id)
+                        }
                         Column {
-                            x: 0; y: 36; width: parent.width - 70; spacing: 8
+                            id: info
+                            x: 0; y: 36; width: parent.width; spacing: 8
                             Repeater {
                                 model: block.modelData.limits || []
                                 Column {
                                     required property var modelData
                                     width: parent.width; spacing: 3
                                     Text {
-                                        text: modelData.label + " " + modelData.used + "% · " + card.until(modelData.resetsAt)
+                                        text: modelData.label + " " + card.leftOf(modelData) + "% 남음 · " + card.until(modelData.resetsAt)
                                         color: Theme.inkSecondary; font.family: dockFont; font.pixelSize: 11
                                         font.features: Theme.numberFeatures
                                     }
-                                    Meter { width: parent.width; height: 4; value: modelData.used; fill: card.usageColor(modelData.used) }
+                                    Meter {
+                                        width: parent.width; height: 4
+                                        value: card.leftOf(modelData); fill: card.leftColor(card.leftOf(modelData))
+                                    }
                                 }
                             }
                             Text {
                                 visible: block.modelData.id === "claude"
                                 width: parent.width; wrapMode: Text.Wrap
                                 text: "오늘 " + card.tokens(block.modelData.tokens) + " 토큰 · 마지막 사용 " + card.ago(block.modelData.lastUsed)
-                                    + ((block.modelData.limits || []).length ? "" : "\nClaude Code를 한 번 실행하면 남은 한도가 보입니다.")
+                                    + ((block.modelData.limits || []).length ? ""
+                                       : block.modelData.note === "expired" ? "\nClaude 앱을 한 번 열면 남은 한도가 다시 보여요"
+                                       : "\n남은 한도를 불러오지 못했어요")
                                 color: Theme.inkSecondary; font.family: dockFont; font.pixelSize: 11
                                 lineHeight: 1.2
+                            }
+                            Text {
+                                visible: block.modelData.id !== "claude" && !(block.modelData.limits || []).length
+                                text: "아직 한도 기록이 없어요"
+                                color: Theme.inkSecondary; font.family: dockFont; font.pixelSize: 11
                             }
                             Text {
                                 visible: block.modelData.asOf > 0
                                 text: "기록 기준 " + card.ago(block.modelData.asOf)
                                 color: Theme.inkTertiary; font.family: dockFont; font.pixelSize: 10
                             }
-                        }
-                        GlassButton {
-                            anchors.right: parent.right; y: 36
-                            text: "열기"; accent: true
-                            onClicked: aiStatus.openApp(block.modelData.id)
                         }
                     }
                 }

@@ -1,9 +1,9 @@
 import QtQuick
 import QtQuick.Effects
 
-// AirPods notice that grows out of a small pill at the top of the screen.
+// AirPods (or calendar) notice that grows out of a small pill at the top of the screen.
 // One show runs 4 s: spring open from a = 0, spring closed from a = 3.3, then
-// the resting pill fades. The window is input-transparent, so the island
+// the resting pill fades; a calendar reminder stays open 4 s longer. The window is input-transparent, so the island
 // never takes a click. It wears the dock's glass: dark tint, hairline rim,
 // top sheen, neutral shadow; colour only in the small status marks.
 Item {
@@ -17,28 +17,32 @@ Item {
     width: Math.round(470 * s)
     height: Math.round(228 * s)
     // One-shot on the desktop, not a loop: the resting pill fades instead of popping off.
-    opacity: 1 - Theme.seg(t, 3.75, duration)
+    opacity: 1 - Theme.seg(t, closeAt + 0.45, duration)
 
     property string title: ""
     property string subtitle: ""
-    property string tone: "connected"   // connected | disconnected | low | micOn | micOff
+    property string tone: "connected"   // connected | disconnected | low | micOn | micOff | event
     property var batteries: []          // [{label, value, charging}] for L, R, case
+    property color mark: Theme.charge   // an event's colour
+    readonly property bool eventTone: tone === "event"
+
 
     // Seconds since the notification appeared; driven by the frame clock.
     property real a: 4
     // Preview/check hook: render one moment of the animation without the clock.
     property real forcedTime: -1
     readonly property real t: forcedTime >= 0 ? forcedTime : a
-    readonly property real closeAt: 3.3
-    readonly property real duration: 4
+    readonly property real closeAt: eventTone ? 7.3 : 3.3
+    readonly property real duration: closeAt + 0.7
 
     signal finished()
 
-    function show(newTitle, newSubtitle, newTone, newBatteries) {
+    function show(newTitle, newSubtitle, newTone, newBatteries, newMark) {
         title = newTitle
         subtitle = newSubtitle
         tone = newTone
         batteries = newBatteries || []
+        mark = newMark || Theme.charge
         a = 0
     }
 
@@ -46,7 +50,7 @@ Item {
     readonly property real p: t < closeAt ? Theme.spring(13, 0.6, t) : 1 - Theme.spring(15, 0.62, t - closeAt)
     readonly property real contentOpacity: Theme.seg(t, 0.16, 0.36) * (1 - Theme.seg(t, closeAt, closeAt + 0.12))
     // The same status colours as the dock's dots.
-    readonly property color accent: tone === "low" ? Theme.warn : tone === "disconnected" ? Theme.inkTertiary
+    readonly property color accent: eventTone ? mark : tone === "low" ? Theme.warn : tone === "disconnected" ? Theme.inkTertiary
         : tone === "micOff" ? Theme.bad : Theme.good
     readonly property bool micTone: tone === "micOn" || tone === "micOff"
 
@@ -126,10 +130,36 @@ Item {
                     border.width: 1; border.color: Theme.stroke
                     DockIcon {
                         anchors.centerIn: parent
+                        opacity: island.eventTone ? 0 : 1
                         size: 30
                         name: island.micTone ? "microphone" : "headphones"
                         pose: island.tone === "micOff" ? "muted" : ""
                         color: island.tone === "disconnected" ? Theme.inkSecondary : Theme.ink
+                    }
+                }
+                // A calendar leaf for reminders: today's date under a band in the event's colour.
+                Item {
+                    opacity: island.eventTone ? 1 : 0
+                    anchors.centerIn: avatar
+                    width: 34; height: 36
+                    Rectangle {
+                        anchors.fill: parent
+                        radius: 8
+                        color: "#2A2A32"
+                        border.width: 1; border.color: Theme.stroke
+                    }
+                    Rectangle {
+                        width: parent.width; height: 11; radius: 8
+                        color: island.mark
+                        Rectangle { y: 5; width: parent.width; height: 6; color: island.mark }
+                    }
+                    Text {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        y: 13
+                        text: new Date().getDate()
+                        color: Theme.ink
+                        font.family: dockFont; font.pixelSize: 17; font.weight: Font.DemiBold
+                        font.features: Theme.numberFeatures
                     }
                 }
                 // Status badge on the avatar: check when connected, ! when low.

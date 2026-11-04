@@ -11,7 +11,10 @@ import features  # noqa: E402
 from features import DockFeatures  # noqa: E402
 from prefs import DockPrefs  # noqa: E402
 
-_app = QCoreApplication.instance() or QCoreApplication([])
+from PySide6.QtGui import QGuiApplication  # noqa: E402
+
+# A GUI application: the memo test lays out text documents.
+_app = QCoreApplication.instance() or QGuiApplication([])
 
 
 class Devices(QObject):
@@ -259,3 +262,164 @@ def test_launcher_adds_sites_follows_shortcuts_and_reorders(tmp_path, monkeypatc
     again = launcher.LauncherBackend(QSettings(str(tmp_path / "launcher.ini"), QSettings.IniFormat))
     assert [(a["name"], a.get("url", "")) for a in again.apps][:2] == [("Github", "https://github.com/"),
                                                                        ("NAVER", "https://naver.com")]
+
+
+def test_event_reminders_fire_once_and_survive_a_restart(tmp_path):
+    from datetime import datetime, timedelta
+    from PySide6.QtCore import QCoreApplication
+    from events import EventStore
+    QCoreApplication.instance() or QCoreApplication([])
+    clock = {"now": datetime(2026, 11, 4, 14, 0)}
+    path = tmp_path / "events.json"
+    store = EventStore(path, clock=lambda: clock["now"], start=False)
+    shown = []
+    store.reminder.connect(lambda *args: shown.append(args))
+    meeting = store.save(dict(date="2026-11-04", time="14:30", title="디자인 리뷰", color=store.colors[2], remind=10))
+    store.save(dict(date="2026-11-05", time="", title="생일", color=store.colors[3], remind=0))
+    assert store.save(dict(date="2026-11-04", time="25:00", title="x", remind=0)) == ""     # bad time
+    assert store.save(dict(date="2026-11-04", time="", title="  ", remind=0)) == ""       # no title
+    assert store.next["title"] == "디자인 리뷰" and store.next["when"] == "오늘 14:30"
+    assert store.marks == {"2026-11-04": [store.colors[2]], "2026-11-05": [store.colors[3]]}
+    store.check()
+    assert shown == []
+    clock["now"] = datetime(2026, 11, 4, 14, 20)
+    store.check()
+    store.check()
+    assert shown == [("디자인 리뷰", "10분 후 · 14:30", store.colors[2])]
+    # A restart does not repeat it; an all-day reminder long missed (dock was off) is skipped.
+    clock["now"] = datetime(2026, 11, 5, 11, 0)
+    again = EventStore(path, clock=lambda: clock["now"], start=False)
+    again.reminder.connect(lambda *args: shown.append(args))
+    again.check()
+    assert len(shown) == 1
+    # Moving the event later lets its reminder fire again.
+    again.save(dict(id=meeting, date="2026-11-05", time="11:05", title="디자인 리뷰", color=store.colors[2], remind=5))
+    again.check()
+    assert shown[-1] == ("디자인 리뷰", "5분 후 · 11:05", store.colors[2])
+    again.remove(meeting)
+    assert [e["title"] for e in again.forDay("2026-11-05")] == ["생일"]
+
+
+def test_memo_live_formatting_round_trips_as_markdown():
+    from PySide6.QtGui import QGuiApplication, QTextCursor, QTextDocument
+    from memo_format import MemoFormat
+    QGuiApplication.instance() or QGuiApplication([])
+    f = MemoFormat()
+    doc = QTextDocument()
+
+    def end():
+        c = QTextCursor(doc)
+        c.movePosition(QTextCursor.End)
+        return c.position()
+
+    def type_(text):
+        """Like the editor: Enter on an empty item ends the list; typing after an inline style is plain."""
+        pending = []
+        for ch in text:
+            c = QTextCursor(doc)
+            c.movePosition(QTextCursor.End)
+            if ch == "\n":
+                if f.blockKind(doc, end()) != "plain" and f.blockEmpty(doc, end()):
+                    f.setBlock(doc, end(), "plain")
+                    continue
+                c.insertBlock()
+                f.afterNewline(doc, end())
+            else:
+                start = end()
+                c.insertText(ch)
+                for kind in pending:
+                    f.apply(doc, start, start + 1, kind, False)
+                pending = []
+            moved = f.autoformat(doc, end())
+            if moved >= 0 and moved != f.blockStart(doc, moved):   # inline style, not a line prefix
+                pending = [k for k in ("bold", "strike") if f.has(doc, moved, k)]
+
+    type_("# 장보기\n- 우유\n- 빵\n\n[] 계란\n\n그냥 **굵게** 글 ~~취소~~ 끝 www.naver.com 링크")
+    md = doc.toMarkdown()
+    assert md.startswith("# 장보기\n\n- 우유\n- 빵\n- [ ] 계란\n")
+    # Bold is checked on the text: the offscreen test platform has no fonts, and Qt's
+    # Markdown export reads bold through the font (it saves fine on Windows).
+    assert "그냥 굵게 글 ~~취소~~ 끝 [www.naver.com](https://www.naver.com) 링크" in md.replace("**", "")
+    line = doc.lastBlock()
+    bold_at = line.position() + line.text().index("굵게")
+    assert f.has(doc, bold_at + 1, "bold") and f.has(doc, bold_at + 2, "bold")
+    assert not f.has(doc, bold_at + 3, "bold") and not f.has(doc, line.position() + 1, "bold")
+    assert f.toggle(doc, bold_at, bold_at + 2, "bold") is False and not f.has(doc, bold_at + 1, "bold")
+    # check it, take the bullet off "빵", and the heading back to a plain line
+    f.toggleCheck(doc, doc.findBlockByNumber(3).position())
+    f.setBlock(doc, doc.findBlockByNumber(2).position(), "plain")
+    f.setBlock(doc, 0, "plain")
+    md = doc.toMarkdown()
+    assert md.startswith("장보기\n\n- 우유\n\n빵\n\n- [x] 계란")
+    again = QTextDocument()
+    again.setMarkdown(md)
+    f.normalize(again)
+    assert again.toMarkdown() == md
+
+
+def test_events_over_several_days(tmp_path):
+    from datetime import datetime
+    from events import EventStore
+    store = EventStore(tmp_path / "events.json", clock=lambda: datetime(2026, 11, 3, 9, 0), start=False)
+    trip = store.save(dict(date="2026-11-04", end="2026-11-08", time="", title="여행", color=store.colors[4], remind=0))
+    store.save(dict(date="2026-11-06", time="12:00", title="점심", color=store.colors[1], remind=-1))
+    assert store.save(dict(date="2026-11-08", end="2026-11-04", title="거꾸로", remind=-1)) == ""
+    assert [e["title"] for e in store.forDay("2026-11-06")] == ["여행", "점심"]
+    assert store.forDay("2026-11-06")[0]["span"] == "11/4–11/8"
+    assert store.forDay("2026-11-09") == []
+    assert [(r["id"], r["date"], r["end"]) for r in store.ranges] == [(trip, "2026-11-04", "2026-11-08")]
+    assert store.marks == {"2026-11-06": [store.colors[1]]}       # dots only for one-day events
+    assert store.next["when"] == "내일 11/4–11/8"
+    # An old save without an end reads as one day.
+    again = EventStore(tmp_path / "events.json", start=False)
+    assert all(e["end"] >= e["date"] for e in again.forDay("2026-11-06"))
+
+
+def test_codex_limits_come_from_the_newest_session_that_has_them(tmp_path):
+    import json
+    import os
+    import time
+    from ai_status import latest_codex_limits
+    now = time.time()
+    old = tmp_path / "2026" / "11" / "01" / "rollout-a.jsonl"
+    new = tmp_path / "2026" / "11" / "04" / "rollout-b.jsonl"
+    for path in (old, new):
+        path.parent.mkdir(parents=True)
+    old.write_text(json.dumps({"payload": {"rate_limits": {"secondary": {
+        "used_percent": 99, "window_minutes": 10080, "resets_at": now + 3600}}}}) + "\n", encoding="utf-8")
+    new.write_text('{"payload": {"type": "session_meta"}}\n', encoding="utf-8")   # opened, no turn yet
+    os.utime(old, (now - 86400, now - 86400))
+    limits = latest_codex_limits(tmp_path, now)["limits"]
+    assert [(l["label"], l["used"]) for l in limits] == [("주간", 99)]
+    assert latest_codex_limits(tmp_path / "missing", now)["limits"] == []
+
+
+def test_claude_usage_reads_the_usage_page_without_leaking_the_login(tmp_path, monkeypatch):
+    import io
+    import json
+    import time
+    import urllib.request
+    import ai_status
+    now = time.time()
+    login = tmp_path / ".credentials.json"
+    login.write_text(json.dumps({"claudeAiOauth": {"accessToken": "secret-token", "expiresAt": (now + 3600) * 1000}}),
+                     encoding="utf-8")
+    seen = {}
+
+    def answer(request, timeout):
+        seen["url"], seen["auth"] = request.full_url, request.get_header("Authorization")
+        return io.BytesIO(json.dumps({
+            "five_hour": {"utilization": 53.0, "resets_at": "2099-01-01T00:00:00+00:00"},
+            "seven_day": {"utilization": 50.0, "resets_at": now - 60}}).encode())
+
+    monkeypatch.setattr(urllib.request, "urlopen", answer)
+    result = ai_status.claude_usage(login, now)
+    assert seen == {"url": "https://api.anthropic.com/api/oauth/usage", "auth": "Bearer secret-token"}
+    assert [(l["label"], l["used"]) for l in result["limits"]] == [("5시간", 53), ("주간", 0)]   # the week rolled over
+    assert result["note"] == "" and "secret-token" not in json.dumps(result)
+    # An expired login is not sent anywhere (renewing it is left to Claude).
+    login.write_text(json.dumps({"claudeAiOauth": {"accessToken": "secret-token", "expiresAt": (now - 60) * 1000}}),
+                     encoding="utf-8")
+    seen.clear()
+    assert ai_status.claude_usage(login, now)["note"] == "expired" and seen == {}
+    assert ai_status.claude_usage(tmp_path / "none.json", now)["note"] == "nologin"

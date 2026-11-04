@@ -128,8 +128,8 @@ DockCard {
                         app: modelData
                         x: grid.slotX(lifted ? index : grid.shown(index))
                         y: grid.slotY(lifted ? index : grid.shown(index))
-                        Behavior on x { enabled: !tileView.lifted; NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
-                        Behavior on y { enabled: !tileView.lifted; NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
+                        Behavior on x { enabled: grid.dragFrom >= 0 && !tileView.lifted; NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
+                        Behavior on y { enabled: grid.dragFrom >= 0 && !tileView.lifted; NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
                         dx: lifted ? tileDrag.activeTranslation.x : 0
                         dy: lifted ? tileDrag.activeTranslation.y : 0
                         z: lifted ? 10 : hovered ? 2 : magnify > 0.05 ? 1 : 0
