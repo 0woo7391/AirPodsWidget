@@ -50,6 +50,8 @@ Item {
 
     // ---- edit mode (dock.editing): wobble, remove, resize, drag to reorder ----
     readonly property bool editing: !!dock && dock.editing
+    // A card whose own content stays usable while editing (the launcher reorders its tiles).
+    property bool editInteractive: false
     readonly property bool dragging: editDrag.active
     // Pointer position in dock coordinates while dragged, and where on the card it grabbed.
     property point dragPoint: Qt.point(0, 0)
@@ -159,7 +161,7 @@ Item {
             sourceComponent: card.summary
             opacity: 1 - card.railness
             visible: opacity > 0
-            enabled: !card.rail && !card.editing
+            enabled: !card.rail && (!card.editing || card.editInteractive)
         }
         Loader {
             width: card.width

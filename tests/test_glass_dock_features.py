@@ -217,3 +217,45 @@ def test_claude_limits_read_from_the_status_line_save(tmp_path):
     assert [(l["label"], l["used"]) for l in limits] == [("5시간", 0), ("주간", 81)]   # the 5-hour one rolled over
     assert limits[1]["resetsAt"] == (now + 3600) * 1000
     assert claude_limits(tmp_path / "missing.json")["limits"] == []
+
+
+def test_web_addresses_and_site_names():
+    from launcher import normalize_url, site_name
+    assert normalize_url("naver.com") == "https://naver.com"
+    assert normalize_url(" https://www.instagram.com/ ") == "https://www.instagram.com/"
+    assert normalize_url("not a site") == "" and normalize_url("hello") == "" and normalize_url("ftp://x.com") == ""
+    assert site_name("https://www.instagram.com/") == "Instagram"
+    assert site_name("https://m.naver.com") == "Naver"
+    assert site_name("https://www.naver.co.kr") == "Naver"
+
+
+def test_launcher_adds_sites_follows_shortcuts_and_reorders(tmp_path, monkeypatch):
+    import time
+    import launcher
+    from PySide6.QtCore import QCoreApplication, QSettings, QUrl
+    from PySide6.QtGui import QImage
+    app = QCoreApplication.instance() or QCoreApplication([])
+    icon = QImage(64, 64, QImage.Format_ARGB32)
+    icon.fill(0xFF3366CC)
+    monkeypatch.setattr(launcher, "fetch_site", lambda url: (icon, "NAVER" if "naver" in url else ""))
+    settings = QSettings(str(tmp_path / "launcher.ini"), QSettings.IniFormat)
+    backend = launcher.LauncherBackend(settings)
+    shortcut = tmp_path / "Insta.url"
+    shortcut.write_text("[InternetShortcut]\nURL=https://www.instagram.com/\n", encoding="utf-8")
+    exe = tmp_path / "tool.exe"
+    exe.write_bytes(b"")
+    assert backend.addWebsite("naver.com")
+    assert not backend.addWebsite("naver.com")          # already there
+    assert backend.addUrls([QUrl.fromLocalFile(str(shortcut)), QUrl.fromLocalFile(str(exe)),
+                            QUrl("https://github.com/")]) == 3
+    deadline = time.time() + 5
+    while any(not a["hasIcon"] for a in backend.apps if a.get("url")) and time.time() < deadline:
+        app.processEvents()
+    apps = backend.apps
+    assert [a["name"] for a in apps] == ["NAVER", "Instagram", "tool", "Github"]
+    assert all(a["hasIcon"] for a in apps)
+    backend.move(3, 0)
+    assert [a["name"] for a in backend.apps] == ["Github", "NAVER", "Instagram", "tool"]
+    again = launcher.LauncherBackend(QSettings(str(tmp_path / "launcher.ini"), QSettings.IniFormat))
+    assert [(a["name"], a.get("url", "")) for a in again.apps][:2] == [("Github", "https://github.com/"),
+                                                                       ("NAVER", "https://naver.com")]
