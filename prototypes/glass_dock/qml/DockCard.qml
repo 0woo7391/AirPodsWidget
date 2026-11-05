@@ -178,10 +178,12 @@ Item {
         id: hover
         onHoveredChanged: if (card.dock) card.dock.cardHover(card, hovered)
     }
-    // On the rail, hovering only widens the labels; a click opens the detail.
+    // On the rail, hovering only widens the labels; a click opens the detail, or for a card
+    // without one (the mic) does its one action (railTapped).
+    signal railTapped()
     TapHandler {
-        enabled: card.rail && card.expandable && !card.expanded && !!card.dock && !card.editing
-        onTapped: card.dock.openNow(card.cardId)
+        enabled: card.rail && !card.expanded && !!card.dock && !card.editing
+        onTapped: card.expandable ? card.dock.openNow(card.cardId) : card.railTapped()
     }
     // Hold a card, or right-click it, to edit the dock (like a phone's home screen).
     TapHandler {

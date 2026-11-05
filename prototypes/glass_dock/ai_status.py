@@ -269,11 +269,16 @@ class AiStatus(QObject):
             self._update.emit((item["id"], dict(installed=bool(logo), logo=logo)))
         online, asked = dict(limits=[], asOf=0, note="nologin"), 0.0
         while True:
-            self._update.emit(("codex", latest_codex_limits()))
-            if time.time() - asked >= ONLINE_REFRESH_SECONDS:
-                online, asked = claude_usage(), time.time()
-            limits = online if online["limits"] else dict(claude_limits(), note=online["note"])
-            self._update.emit(("claude", dict(claude_today(), **limits)))
+            # Logs are written and renamed while they are read; one failed read must not end the
+            # refresh for the rest of the session, so it is skipped and tried again next round.
+            try:
+                self._update.emit(("codex", latest_codex_limits()))
+                if time.time() - asked >= ONLINE_REFRESH_SECONDS:
+                    online, asked = claude_usage(), time.time()
+                limits = online if online["limits"] else dict(claude_limits(), note=online["note"])
+                self._update.emit(("claude", dict(claude_today(), **limits)))
+            except Exception:
+                pass
             if self._stop.wait(FILE_REFRESH_SECONDS):
                 return
 

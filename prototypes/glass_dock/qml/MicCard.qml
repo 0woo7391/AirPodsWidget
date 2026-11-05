@@ -16,6 +16,7 @@ DockCard {
     railLabel: "마이크"
     railStatus: !mic.available ? "없음" : muted ? "꺼짐" : "켜짐"
     railDot: mic.available && muted ? Theme.bad : "transparent"
+    onRailTapped: if (mic.available) audioExtras.toggleMic()
 
     summary: Component {
         Item {
