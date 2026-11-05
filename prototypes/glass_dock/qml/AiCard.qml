@@ -157,6 +157,7 @@ DockCard {
 
     detail: Component {
         Item {
+            Component.onCompleted: aiStatus.refresh()   // fresh numbers whenever it is opened
             Text {
                 x: Theme.pad; y: Theme.pad
                 text: "AI"

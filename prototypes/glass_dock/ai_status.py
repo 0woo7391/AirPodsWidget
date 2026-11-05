@@ -14,6 +14,7 @@ an open window comes to the front and a closed app starts.
 from __future__ import annotations
 
 import asyncio
+import base64
 import ctypes
 import json
 import os
@@ -37,7 +38,15 @@ LIMIT_NAMES = {300: "5시간", 10080: "주간"}
 CLAUDE_LIMITS = Path(os.environ.get("LOCALAPPDATA", HOME)) / "GlassDock" / "claude_limits.json"
 CLAUDE_CREDENTIALS = HOME / ".claude" / ".credentials.json"
 CLAUDE_USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
-ONLINE_REFRESH_SECONDS = 180
+CODEX_AUTH = HOME / ".codex" / "auth.json"
+CODEX_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage"
+WINDOW_MINUTES = {18000: 300, 604800: 10080}
+# How each app renews its own login (the same requests, so the renewed login keeps working there).
+CLAUDE_TOKEN_URLS = ["https://platform.claude.com/v1/oauth/token", "https://console.anthropic.com/v1/oauth/token"]
+CLAUDE_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
+CODEX_TOKEN_URL = "https://auth.openai.com/oauth/token"
+CODEX_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
+ONLINE_REFRESH_SECONDS = 60
 FILE_REFRESH_SECONDS = 20
 POLL_SECONDS = 1.0
 
@@ -65,6 +74,126 @@ def latest_codex_limits(root: Path = HOME / ".codex" / "sessions", now: float | 
         if result["limits"]:
             return result
     return dict(limits=[], asOf=0)
+
+
+def _jwt_expiry(token: str) -> float:
+    """The `exp` of a JWT access token (seconds), 0 when it cannot be read."""
+    try:
+        return float(json.loads(base64.urlsafe_b64decode(token.split(".")[1] + "=="))["exp"])
+    except (IndexError, ValueError, KeyError, TypeError):
+        return 0.0
+
+
+def _post_json(url: str, body: dict) -> dict:
+    request = urllib.request.Request(url, data=json.dumps(body).encode(), method="POST", headers={
+        "Content-Type": "application/json", "Accept": "application/json", "User-Agent": "GlassDock"})
+    with urllib.request.urlopen(request, timeout=15) as response:
+        return json.loads(response.read())
+
+
+def _write_login(path: Path, data: dict) -> None:
+    """Replace the login file in one step, so the app never reads half of it."""
+    temp = path.with_name(path.name + ".glassdock.tmp")
+    temp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    os.replace(temp, path)
+
+
+def renew_claude(credentials: Path = CLAUDE_CREDENTIALS, now: float | None = None, force: bool = False) -> bool:
+    """Renew an expired Claude login the way Claude Code does and save it back; True when the
+    file now holds a fresh login. The file is read again first: when Claude renewed it in the
+    meantime, that login is kept and nothing is sent."""
+    now = time.time() if now is None else now
+    try:
+        data = json.loads(credentials.read_text(encoding="utf-8"))
+        oauth = data["claudeAiOauth"]
+        refresh = oauth["refreshToken"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+    if not force and oauth.get("expiresAt", 0) / 1000 > now + 60:
+        return True
+    for url in CLAUDE_TOKEN_URLS:
+        try:
+            answer = _post_json(url, dict(grant_type="refresh_token", refresh_token=refresh, client_id=CLAUDE_CLIENT_ID))
+        except urllib.error.HTTPError as error:
+            if error.code in (400, 401, 403):
+                return False      # the renewal itself was refused: a new sign-in in Claude is needed
+            continue
+        except (OSError, ValueError):
+            continue
+        if not answer.get("access_token"):
+            return False
+        oauth["accessToken"] = answer["access_token"]
+        oauth["refreshToken"] = answer.get("refresh_token") or refresh
+        oauth["expiresAt"] = int((now + float(answer.get("expires_in") or 3600)) * 1000)
+        _write_login(credentials, data)
+        return True
+    return False
+
+
+def renew_codex(auth: Path = CODEX_AUTH, now: float | None = None, force: bool = False) -> bool:
+    """Renew an expired Codex login the way Codex does and save it back (see renew_claude)."""
+    now = time.time() if now is None else now
+    try:
+        data = json.loads(auth.read_text(encoding="utf-8"))
+        tokens = data["tokens"]
+        refresh = tokens["refresh_token"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+    if not force and _jwt_expiry(tokens.get("access_token", "")) > now + 60:
+        return True
+    try:
+        answer = _post_json(CODEX_TOKEN_URL, dict(client_id=CODEX_CLIENT_ID, grant_type="refresh_token",
+                                                  refresh_token=refresh, scope="openid profile email"))
+    except (OSError, ValueError):
+        return False
+    if not answer.get("access_token"):
+        return False
+    tokens["access_token"] = answer["access_token"]
+    tokens["refresh_token"] = answer.get("refresh_token") or refresh
+    if answer.get("id_token"):
+        tokens["id_token"] = answer["id_token"]
+    data["last_refresh"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    _write_login(auth, data)
+    return True
+
+
+def codex_usage(auth: Path = CODEX_AUTH, now: float | None = None, renewed: bool = False) -> dict:
+    """{limits, asOf(ms), note} from OpenAI's usage page, with the Codex login on this PC
+    (Codex itself no longer writes the numbers to its logs). The token and account id go to
+    chatgpt.com only and are never printed or kept; the answer's other fields are dropped.
+    note as for claude_usage."""
+    now = time.time() if now is None else now
+    try:
+        tokens = json.loads(auth.read_text(encoding="utf-8"))["tokens"]
+        token, account = tokens["access_token"], tokens.get("account_id", "")
+    except (OSError, ValueError, KeyError, TypeError):
+        return dict(limits=[], asOf=0, note="nologin")
+    if 0 < _jwt_expiry(token) < now:
+        if not renewed and renew_codex(auth, now):
+            return codex_usage(auth, now, renewed=True)
+        return dict(limits=[], asOf=0, note="expired")
+    request = urllib.request.Request(CODEX_USAGE_URL, headers={
+        "Authorization": "Bearer " + token, "ChatGPT-Account-Id": account,
+        "Accept": "application/json", "User-Agent": "GlassDock"})
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            windows = (json.loads(response.read()).get("rate_limit") or {})
+    except urllib.error.HTTPError as error:
+        if error.code in (401, 403) and not renewed and renew_codex(auth, now, force=True):
+            return codex_usage(auth, now, renewed=True)
+        return dict(limits=[], asOf=0, note="expired" if error.code in (401, 403) else "offline")
+    except (OSError, ValueError, AttributeError):
+        return dict(limits=[], asOf=0, note="offline")
+    limits = []
+    for key in ("primary_window", "secondary_window"):
+        part = windows.get(key) if isinstance(windows, dict) else None
+        window = WINDOW_MINUTES.get(int(part.get("limit_window_seconds") or 0)) if isinstance(part, dict) else None
+        if window is None:
+            continue
+        resets = float(part.get("reset_at") or 0)
+        used = 0.0 if resets and resets < now else float(part.get("used_percent") or 0)
+        limits.append(dict(label=LIMIT_NAMES[window], used=round(used), resetsAt=resets * 1000, window=window))
+    return dict(limits=limits, asOf=now * 1000 if limits else 0, note="" if limits else "offline")
 
 
 def codex_limits(path: Path | None, now: float | None = None) -> dict:
@@ -111,12 +240,12 @@ def claude_limits(path: Path = CLAUDE_LIMITS, now: float | None = None) -> dict:
     return dict(limits=limits, asOf=as_of if limits else 0)
 
 
-def claude_usage(credentials: Path = CLAUDE_CREDENTIALS, now: float | None = None) -> dict:
+def claude_usage(credentials: Path = CLAUDE_CREDENTIALS, now: float | None = None, renewed: bool = False) -> dict:
     """{limits, asOf(ms), note} from Anthropic's usage page, with the Claude login on this PC.
 
-    note: "" when read, "nologin" (no login file), "expired" (the login needs renewing:
-    left to Claude itself, since renewing here would sign Claude Code out), "offline".
-    The token is sent to api.anthropic.com only, and never printed or kept.
+    An expired login is renewed and saved back (renew_claude; the user agreed to it).
+    note: "" when read, "nologin" (no login file), "expired" (renewing failed too: a new sign-in
+    in Claude is needed), "offline". The token goes to Anthropic only, never printed or kept.
     """
     now = time.time() if now is None else now
     try:
@@ -125,6 +254,8 @@ def claude_usage(credentials: Path = CLAUDE_CREDENTIALS, now: float | None = Non
     except (OSError, ValueError, KeyError, TypeError):
         return dict(limits=[], asOf=0, note="nologin")
     if oauth.get("expiresAt") and oauth["expiresAt"] / 1000 < now:
+        if not renewed and renew_claude(credentials, now):
+            return claude_usage(credentials, now, renewed=True)
         return dict(limits=[], asOf=0, note="expired")
     request = urllib.request.Request(CLAUDE_USAGE_URL, headers={
         "Authorization": "Bearer " + token, "anthropic-beta": "oauth-2025-04-20",
@@ -133,6 +264,8 @@ def claude_usage(credentials: Path = CLAUDE_CREDENTIALS, now: float | None = Non
         with urllib.request.urlopen(request, timeout=10) as response:
             data = json.loads(response.read())
     except urllib.error.HTTPError as error:
+        if error.code in (401, 403) and not renewed and renew_claude(credentials, now, force=True):
+            return claude_usage(credentials, now, renewed=True)
         return dict(limits=[], asOf=0, note="expired" if error.code in (401, 403) else "offline")
     except (OSError, ValueError):
         return dict(limits=[], asOf=0, note="offline")
@@ -236,6 +369,8 @@ class AiStatus(QObject):
         self._items = {a["id"]: dict(a, installed=False, logo="", unread=0, limits=[], asOf=0, tokens=0, lastUsed=0)
                        for a in ASSISTANTS}
         self._stop = threading.Event()
+        self._wake = threading.Event()   # ends the wait between rounds early
+        self._now = threading.Event()    # the next round asks the servers again
         self._threads: list[threading.Thread] = []
         self._update.connect(self._apply)
 
@@ -260,26 +395,39 @@ class AiStatus(QObject):
                 thread.start()
                 self._threads.append(thread)
 
+    @Slot()
+    def refresh(self):
+        """Ask again now (the AI card calls this when its flyout opens)."""
+        self._now.set()
+        self._wake.set()
+
     def stop(self):
         self._stop.set()
+        self._wake.set()
 
     def _files(self):
         for item in ASSISTANTS:
             logo = app_logo(item["package"])
             self._update.emit((item["id"], dict(installed=bool(logo), logo=logo)))
-        online, asked = dict(limits=[], asOf=0, note="nologin"), 0.0
+        none = dict(limits=[], asOf=0, note="nologin")
+        online, asked = dict(codex=none, claude=none), 0.0
         while True:
             # Logs are written and renamed while they are read; one failed read must not end the
             # refresh for the rest of the session, so it is skipped and tried again next round.
             try:
-                self._update.emit(("codex", latest_codex_limits()))
-                if time.time() - asked >= ONLINE_REFRESH_SECONDS:
-                    online, asked = claude_usage(), time.time()
-                limits = online if online["limits"] else dict(claude_limits(), note=online["note"])
-                self._update.emit(("claude", dict(claude_today(), **limits)))
+                if time.time() - asked >= ONLINE_REFRESH_SECONDS or self._now.is_set():
+                    self._now.clear()
+                    online, asked = dict(codex=codex_usage(), claude=claude_usage()), time.time()
+                # The server's numbers when it answered; otherwise the last ones saved on disk.
+                codex = online["codex"] if online["codex"]["limits"] else dict(latest_codex_limits(), note=online["codex"]["note"])
+                claude = online["claude"] if online["claude"]["limits"] else dict(claude_limits(), note=online["claude"]["note"])
+                self._update.emit(("codex", codex))
+                self._update.emit(("claude", dict(claude_today(), **claude)))
             except Exception:
                 pass
-            if self._stop.wait(FILE_REFRESH_SECONDS):
+            self._wake.wait(FILE_REFRESH_SECONDS)   # or sooner: refresh() and stop() wake it
+            self._wake.clear()
+            if self._stop.is_set():
                 return
 
     def _notifications(self):

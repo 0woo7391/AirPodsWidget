@@ -423,3 +423,86 @@ def test_claude_usage_reads_the_usage_page_without_leaking_the_login(tmp_path, m
     seen.clear()
     assert ai_status.claude_usage(login, now)["note"] == "expired" and seen == {}
     assert ai_status.claude_usage(tmp_path / "none.json", now)["note"] == "nologin"
+
+
+def test_codex_usage_reads_the_usage_page_without_leaking_the_login(tmp_path, monkeypatch):
+    import base64
+    import io
+    import json
+    import time
+    import urllib.request
+    import ai_status
+    now = time.time()
+
+    def jwt(exp):
+        part = base64.urlsafe_b64encode(json.dumps({"exp": exp}).encode()).decode().rstrip("=")
+        return "h." + part + ".s"
+
+    auth = tmp_path / "auth.json"
+    auth.write_text(json.dumps({"tokens": {"access_token": jwt(now + 3600), "account_id": "acct-1"}}), encoding="utf-8")
+    seen = {}
+
+    def answer(request, timeout):
+        seen["url"], seen["account"] = request.full_url, request.get_header("Chatgpt-account-id")
+        return io.BytesIO(json.dumps({"email": "someone@example.com", "rate_limit": {
+            "primary_window": {"used_percent": 100, "limit_window_seconds": 18000, "reset_at": now + 600},
+            "secondary_window": {"used_percent": 43, "limit_window_seconds": 604800, "reset_at": now + 86400}}}).encode())
+
+    monkeypatch.setattr(urllib.request, "urlopen", answer)
+    result = ai_status.codex_usage(auth, now)
+    assert seen == {"url": "https://chatgpt.com/backend-api/wham/usage", "account": "acct-1"}
+    assert [(l["label"], l["used"]) for l in result["limits"]] == [("5시간", 100), ("주간", 43)]
+    assert result["note"] == "" and "example.com" not in json.dumps(result) and "acct-1" not in json.dumps(result)
+    auth.write_text(json.dumps({"tokens": {"access_token": jwt(now - 60), "account_id": "acct-1"}}), encoding="utf-8")
+    seen.clear()
+    assert ai_status.codex_usage(auth, now)["note"] == "expired" and seen == {}
+
+
+def test_expired_logins_are_renewed_and_saved_back(tmp_path, monkeypatch):
+    import base64
+    import io
+    import json
+    import time
+    import urllib.request
+    import ai_status
+    now = time.time()
+
+    def jwt(exp):
+        return "h." + base64.urlsafe_b64encode(json.dumps({"exp": exp}).encode()).decode().rstrip("=") + ".s"
+
+    claude = tmp_path / ".credentials.json"
+    claude.write_text(json.dumps({"claudeAiOauth": {"accessToken": "old", "refreshToken": "r1", "expiresAt": (now - 60) * 1000,
+                                                    "scopes": ["user:inference"], "subscriptionType": "max"}}), encoding="utf-8")
+    codex = tmp_path / "auth.json"
+    codex.write_text(json.dumps({"OPENAI_API_KEY": None, "auth_mode": "chatgpt", "last_refresh": "x",
+                                 "tokens": {"access_token": jwt(now - 60), "refresh_token": "c1", "id_token": "i", "account_id": "a"}}),
+                     encoding="utf-8")
+    posts = []
+
+    def server(request, timeout):
+        url = request.full_url
+        if request.get_method() == "POST":
+            body = json.loads(request.data)
+            posts.append((url, body["grant_type"], body["refresh_token"], body["client_id"]))
+            if "openai" in url:
+                return io.BytesIO(json.dumps({"access_token": jwt(now + 3600), "refresh_token": "c2", "id_token": "i2"}).encode())
+            return io.BytesIO(json.dumps({"access_token": "new", "refresh_token": "r2", "expires_in": 28800}).encode())
+        assert request.get_header("Authorization") in ("Bearer new", "Bearer " + jwt(now + 3600))
+        if "chatgpt" in url:
+            return io.BytesIO(json.dumps({"rate_limit": {"primary_window": {"used_percent": 10, "limit_window_seconds": 18000}}}).encode())
+        return io.BytesIO(json.dumps({"five_hour": {"utilization": 20}}).encode())
+
+    monkeypatch.setattr(urllib.request, "urlopen", server)
+    assert [l["used"] for l in ai_status.claude_usage(claude, now)["limits"]] == [20]
+    assert [l["used"] for l in ai_status.codex_usage(codex, now)["limits"]] == [10]
+    saved = json.loads(claude.read_text(encoding="utf-8"))["claudeAiOauth"]
+    assert (saved["accessToken"], saved["refreshToken"], saved["scopes"], saved["subscriptionType"]) == ("new", "r2", ["user:inference"], "max")
+    assert abs(saved["expiresAt"] / 1000 - (now + 28800)) < 5
+    auth = json.loads(codex.read_text(encoding="utf-8"))
+    assert (auth["tokens"]["refresh_token"], auth["tokens"]["id_token"], auth["tokens"]["account_id"], auth["auth_mode"]) == ("c2", "i2", "a", "chatgpt")
+    assert auth["last_refresh"] != "x"
+    assert [(p[1], p[2]) for p in posts] == [("refresh_token", "r1"), ("refresh_token", "c1")]
+    # Fresh logins now: no renewal is sent again.
+    ai_status.claude_usage(claude, now)
+    ai_status.codex_usage(codex, now)
+    assert len(posts) == 2

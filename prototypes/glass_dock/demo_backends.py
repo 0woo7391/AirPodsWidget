@@ -226,6 +226,10 @@ class DemoAi(QObject):
                 item["unread"] = 0
         self.changed.emit()
 
+    @Slot()
+    def refresh(self):
+        pass
+
 
 def demo_calendar(path):
     """An event store with a few sample events around today (reminders off, so previews stay quiet)."""
